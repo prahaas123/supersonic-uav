@@ -1,0 +1,41 @@
+/*--------------------------------*- C++ -*----------------------------------*\
+| =========                 |                                                 |
+| \\      /  F ield         | OpenFOAM: The Open Source CFD Toolbox           |
+|  \\    /   O peration     | Version: v2312                                  |
+|   \\  /    A nd           | Web: www.openfoam.com                           |
+|    \\/     M anipulation  |                                                 |
+\*---------------------------------------------------------------------------*/
+FoamFile
+{
+    version     2.0;
+    format      ascii;
+    class       dictionary;
+    object      decomposeParDict;
+}
+// ============================================================================
+
+// Adjust to your HPC core count — powers of 2 preferred for scotch
+numberOfSubdomains  16;
+
+// scotch: automatic graph-based partitioning (best load balance)
+method  scotch;
+
+// ── Alternative: hierarchical decomposition ───────────────────────────────────
+// method  hierarchical;
+// hierarchicalCoeffs
+// {
+//     n       (4 2 2);    // 4 x 2 x 2 = 16 subdomains
+//     order   xyz;
+//     delta   0.001;
+// }
+
+// ── Alternative: simple (fastest to set up, worse balance) ───────────────────
+// method  simple;
+// simpleCoeffs
+// {
+//     n       (4 2 2);
+//     delta   0.001;
+// }
+
+// ── Processor weights (for heterogeneous clusters) ───────────────────────────
+// processorWeights ( 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 );

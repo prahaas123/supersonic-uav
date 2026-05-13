@@ -1,0 +1,99 @@
+/*--------------------------------*- C++ -*----------------------------------*\
+| =========                 |                                                 |
+| \\      /  F ield         | OpenFOAM: The Open Source CFD Toolbox           |
+|  \\    /   O peration     | Version: v2312                                  |
+|   \\  /    A nd           | Web: www.openfoam.com                           |
+|    \\/     M anipulation  |                                                 |
+\*---------------------------------------------------------------------------*/
+FoamFile
+{
+    version     2.0;
+    format      ascii;
+    class       dictionary;
+    object      blockMeshDict;
+}
+// ============================================================================
+// Background hex domain for snappyHexMesh to refine into.
+// Domain sized relative to UAV:
+//   Fuselage length ~2 m, wingspan ~2.5 m, ref chord ~0.3 m
+//   Upstream:   10 m  (~5 body lengths — Mach cone fits within domain)
+//   Downstream: 20 m  (~10 body lengths — oblique shock fully developed)
+//   Lateral:    10 m  each side
+
+scale 1;
+
+vertices
+(
+    // Bottom face (Z = -10)
+    (-10 -10 -10)   //  0
+    ( 20 -10 -10)   //  1
+    ( 20  10 -10)   //  2
+    (-10  10 -10)   //  3
+    // Top face (Z = +10)
+    (-10 -10  10)   //  4
+    ( 20 -10  10)   //  5
+    ( 20  10  10)   //  6
+    (-10  10  10)   //  7
+);
+
+blocks
+(
+    hex (0 1 2 3 4 5 6 7)
+    // Cell counts: X=60, Y=40, Z=40 — coarse background; snappy refines near UAV
+    (60 40 40)
+    simpleGrading
+    (
+        // X grading: stretch upstream & downstream, uniform in middle
+        (
+            (0.25 0.25 8.0)    // Upstream 25% of length, 25% of cells, ratio 8 (coarser far away)
+            (0.50 0.50 1.0)    // Middle 50%: uniform
+            (0.25 0.25 0.125)  // Downstream 25%: coarsen away from body
+        )
+        1                      // Y: uniform
+        1                      // Z: uniform
+    )
+);
+
+boundary
+(
+    inlet
+    {
+        type patch;
+        faces ( (0 4 7 3) );   // X = -10 face
+    }
+
+    outlet
+    {
+        type patch;
+        faces ( (1 2 6 5) );   // X = +20 face
+    }
+
+    farfield_bottom
+    {
+        type patch;
+        faces ( (0 1 5 4) );   // Y = -10 face
+    }
+
+    farfield_top
+    {
+        type patch;
+        faces ( (3 7 6 2) );   // Y = +10 face
+    }
+
+    farfield_sides
+    {
+        type patch;
+        faces
+        (
+            (0 3 2 1)           // Z = -10 face
+            (4 5 6 7)           // Z = +10 face
+        );
+    }
+);
+
+// ── Notes ─────────────────────────────────────────────────────────────────────
+// For half-body (symmetry) simulation:
+//   - Change Z range from (-10 to +10) to (0 to +10)
+//   - Rename Z=0 face to "symmetryPlane" with type symmetryPlane
+//   - Remove corresponding symmetryPlane entries from farfield_sides
+//   - Halve Aref in forceCoeffs (or double the computed forces)

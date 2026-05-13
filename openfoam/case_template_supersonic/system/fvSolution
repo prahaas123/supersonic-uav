@@ -1,0 +1,37 @@
+/*--------------------------------*- C++ -*----------------------------------*\
+| =========                 |                                                 |
+| \\      /  F ield         | OpenFOAM: The Open Source CFD Toolbox           |
+|  \\    /   O peration     | Version: v2312                                  |
+|   \\  /    A nd           | Web: www.openfoam.com                           |
+|    \\/     M anipulation  |                                                 |
+\*---------------------------------------------------------------------------*/
+FoamFile
+{
+    version     2.0;
+    format      ascii;
+    class       dictionary;
+    object      fvSolution;
+}
+// ============================================================================
+// rhoCentralFoam is an explicit density-based solver — no PISO/SIMPLE loop.
+// Linear solvers are only needed for the turbulence equations (k, omega).
+
+solvers
+{
+    "(k|omega)"
+    {
+        solver          PBiCGStab;
+        preconditioner  DILU;
+        tolerance       1e-8;
+        relTol          0.01;
+        maxIter         100;
+    }
+
+    "(k|omega)Final"
+    {
+        $k;
+        relTol          0;          // Converge fully on final corrector
+    }
+}
+
+// No PISO or SIMPLE dicts needed for rhoCentralFoam

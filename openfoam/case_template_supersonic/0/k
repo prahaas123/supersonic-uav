@@ -1,0 +1,55 @@
+/*--------------------------------*- C++ -*----------------------------------*\
+| =========                 |                                                 |
+| \\      /  F ield         | OpenFOAM: The Open Source CFD Toolbox           |
+|  \\    /   O peration     | Version: v2312                                  |
+|   \\  /    A nd           | Web: www.openfoam.com                           |
+|    \\/     M anipulation  |                                                 |
+\*---------------------------------------------------------------------------*/
+FoamFile
+{
+    version     2.0;
+    format      ascii;
+    class       volScalarField;
+    object      k;
+}
+// ============================================================================
+
+// k = 1.5 * (TI * U_inf)^2 = 1.5 * (0.001 * 442.6)^2 = 0.295 m2/s2
+// TI = 0.1% — typical high-altitude freestream turbulence
+dimensions      [0 2 -2 0 0 0 0];
+
+internalField   uniform 0.295;
+
+boundaryField
+{
+    inlet
+    {
+        type            fixedValue;
+        value           uniform 0.295;
+    }
+
+    outlet
+    {
+        type            zeroGradient;
+    }
+
+    farfield_top
+    {
+        type            freestream;
+        freestreamValue uniform 0.295;
+    }
+
+    farfield_bottom { $farfield_top; }
+    farfield_sides  { $farfield_top; }
+
+    uav_wall
+    {
+        type            kqRWallFunction;
+        value           uniform 0.295;
+    }
+
+    symmetryPlane
+    {
+        type            symmetryPlane;
+    }
+}

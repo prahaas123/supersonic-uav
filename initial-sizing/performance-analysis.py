@@ -78,13 +78,6 @@ axes[0, 1].set_ylabel("L/D")
 axes[0, 1].set_title("Lift-to-Drag Ratio vs CAS")
 axes[0, 1].grid(True)
 
-# 3. CL vs CAS
-axes[0, 2].plot(v_cas, cl, color="seagreen")
-axes[0, 2].set_xlabel("CAS (m/s)")
-axes[0, 2].set_ylabel("CL")
-axes[0, 2].set_title("Lift Coefficient vs CAS")
-axes[0, 2].grid(True)
-
 # 4. Alpha trim vs CAS
 axes[1, 0].plot(v_cas, alpha_trim, color="crimson")
 axes[1, 0].set_xlabel("CAS (m/s)")
@@ -98,15 +91,6 @@ axes[1, 1].set_xlabel("CAS (m/s)")
 axes[1, 1].set_ylabel("q (Pa)")
 axes[1, 1].set_title("Dynamic Pressure vs CAS")
 axes[1, 1].grid(True)
-
-# 6. Mach vs CAS
-axes[1, 2].plot(v_cas, mach, color="saddlebrown")
-axes[1, 2].axhline(1.0, color="black", linestyle="--", linewidth=0.8, label="M = 1")
-axes[1, 2].set_xlabel("CAS (m/s)")
-axes[1, 2].set_ylabel("Mach")
-axes[1, 2].set_title("Mach Number vs CAS")
-axes[1, 2].legend()
-axes[1, 2].grid(True)
 
 plt.tight_layout()
 plt.show()

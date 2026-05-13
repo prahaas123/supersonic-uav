@@ -1,0 +1,57 @@
+/*--------------------------------*- C++ -*----------------------------------*\
+| =========                 |                                                 |
+| \\      /  F ield         | OpenFOAM: The Open Source CFD Toolbox           |
+|  \\    /   O peration     | Version: v2312                                  |
+|   \\  /    A nd           | Web: www.openfoam.com                           |
+|    \\/     M anipulation  |                                                 |
+\*---------------------------------------------------------------------------*/
+FoamFile
+{
+    version     2.0;
+    format      ascii;
+    class       volScalarField;
+    object      nut;
+}
+// ============================================================================
+
+// nut = k / omega = 0.295 / 49400 = 5.97e-6 m2/s  (nut/nu ~ 0.08, very low)
+// Alternatively initialise to nu_inf = 7.3e-5 m2/s for a mild first step
+dimensions      [0 2 -1 0 0 0 0];
+
+internalField   uniform 7.3e-05;
+
+boundaryField
+{
+    inlet
+    {
+        type            calculated;
+        value           uniform 7.3e-05;
+    }
+
+    outlet
+    {
+        type            calculated;
+        value           uniform 7.3e-05;
+    }
+
+    farfield_top
+    {
+        type            calculated;
+        value           uniform 7.3e-05;
+    }
+
+    farfield_bottom { $farfield_top; }
+    farfield_sides  { $farfield_top; }
+
+    uav_wall
+    {
+        // Spalding wall function handles y+ 1–300 automatically
+        type            nutUSpaldingWallFunction;
+        value           uniform 0;
+    }
+
+    symmetryPlane
+    {
+        type            symmetryPlane;
+    }
+}

@@ -1,0 +1,54 @@
+/*--------------------------------*- C++ -*----------------------------------*\
+| =========                 |                                                 |
+| \\      /  F ield         | OpenFOAM: The Open Source CFD Toolbox           |
+|  \\    /   O peration     | Version: v2312                                  |
+|   \\  /    A nd           | Web: www.openfoam.com                           |
+|    \\/     M anipulation  |                                                 |
+\*---------------------------------------------------------------------------*/
+FoamFile
+{
+    version     2.0;
+    format      ascii;
+    class       volScalarField;
+    object      p;
+}
+// ============================================================================
+
+// ISA @ 15000 m: p = 12112 Pa
+dimensions      [1 -1 -2 0 0 0 0];
+
+internalField   uniform 12112;
+
+boundaryField
+{
+    inlet
+    {
+        type            fixedValue;
+        value           uniform 12112;
+    }
+
+    outlet
+    {
+        type            zeroGradient;
+    }
+
+    farfield_top
+    {
+        type            freestreamPressure;
+        freestreamValue uniform 12112;
+    }
+
+    farfield_bottom { $farfield_top; }
+    farfield_sides  { $farfield_top; }
+
+    uav_wall
+    {
+        // Adiabatic wall — no normal pressure gradient
+        type            zeroGradient;
+    }
+
+    symmetryPlane
+    {
+        type            symmetryPlane;
+    }
+}

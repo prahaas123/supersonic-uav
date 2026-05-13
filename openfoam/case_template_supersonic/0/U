@@ -1,0 +1,56 @@
+/*--------------------------------*- C++ -*----------------------------------*\
+| =========                 |                                                 |
+| \\      /  F ield         | OpenFOAM: The Open Source CFD Toolbox           |
+|  \\    /   O peration     | Version: v2312                                  |
+|   \\  /    A nd           | Web: www.openfoam.com                           |
+|    \\/     M anipulation  |                                                 |
+\*---------------------------------------------------------------------------*/
+FoamFile
+{
+    version     2.0;
+    format      ascii;
+    class       volVectorField;
+    object      U;
+}
+// ============================================================================
+
+dimensions      [0 1 -1 0 0 0 0];
+
+// M=1.5 @ 15000m: U_inf = 442.6 m/s along +X (zero AoA baseline)
+// For AoA sweep: U = (442.6*cos(AoA) 442.6*sin(AoA) 0)
+internalField   uniform (442.6 0 0);
+
+boundaryField
+{
+    inlet
+    {
+        // Supersonic inlet: all variables must be fixed
+        type            fixedValue;
+        value           uniform (442.6 0 0);
+    }
+
+    outlet
+    {
+        // Supersonic outlet: no upstream wave propagation
+        type            zeroGradient;
+    }
+
+    farfield_top
+    {
+        type            freestreamVelocity;
+        freestreamValue uniform (442.6 0 0);
+    }
+
+    farfield_bottom { $farfield_top; }
+    farfield_sides  { $farfield_top; }
+
+    uav_wall
+    {
+        type            noSlip;
+    }
+
+    symmetryPlane
+    {
+        type            symmetryPlane;
+    }
+}

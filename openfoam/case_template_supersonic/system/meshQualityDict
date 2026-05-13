@@ -1,0 +1,63 @@
+/*--------------------------------*- C++ -*----------------------------------*\
+| =========                 |                                                 |
+| \\      /  F ield         | OpenFOAM: The Open Source CFD Toolbox           |
+|  \\    /   O peration     | Version: v2312                                  |
+|   \\  /    A nd           | Web: www.openfoam.com                           |
+|    \\/     M anipulation  |                                                 |
+\*---------------------------------------------------------------------------*/
+FoamFile
+{
+    version     2.0;
+    format      ascii;
+    class       dictionary;
+    object      meshQualityDict;
+}
+// ============================================================================
+// Quality thresholds for snappyHexMesh.
+// Compressible solvers (rhoCentralFoam) are more sensitive to mesh quality
+// than incompressible solvers — keep non-orthogonality < 70 deg.
+
+// Maximum non-orthogonality angle [degrees]
+// Ideal: < 70; Acceptable: < 75 with correction; rhoCentralFoam is explicit
+// so non-ortho corrections in fvSchemes help but do not fully compensate
+maxNonOrtho         70;
+
+// Maximum skewness
+maxBoundarySkewness 20;
+maxInternalSkewness 4;
+
+// Maximum concaveness [degrees]
+maxConcave          80;
+
+// Minimum pyramid volume: set negative to disable
+minFlatness         0.5;
+
+// Minimum cell volume
+minVol              1e-13;
+
+// Minimum tet quality (used by snappy internal checks)
+minTetQuality       1e-9;
+
+// Minimum face area: -1 = disable
+minArea             -1;
+
+// Minimum cell determinant (0=flat cell, 1=hex)
+minDeterminant      0.001;
+
+// Minimum face interpolation weight
+minFaceWeight       0.05;
+
+// Minimum cell volume ratio between adjacent cells
+minVolRatio         0.01;
+
+// Minimum twist: -1 = disable
+minTriangleTwist    -1;
+
+// Minimum twist for face centres
+minTwist            0.02;
+
+// Relaxed criteria used during layer addition
+relaxed
+{
+    maxNonOrtho     75;
+}

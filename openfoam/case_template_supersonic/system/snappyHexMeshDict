@@ -1,0 +1,181 @@
+/*--------------------------------*- C++ -*----------------------------------*\
+| =========                 |                                                 |
+| \\      /  F ield         | OpenFOAM: The Open Source CFD Toolbox           |
+|  \\    /   O peration     | Version: v2312                                  |
+|   \\  /    A nd           | Web: www.openfoam.com                           |
+|    \\/     M anipulation  |                                                 |
+\*---------------------------------------------------------------------------*/
+FoamFile
+{
+    version     2.0;
+    format      ascii;
+    class       dictionary;
+    object      snappyHexMeshDict;
+}
+// ============================================================================
+
+castellatedMesh true;
+snap            true;
+addLayers       true;
+
+// ── Geometry ──────────────────────────────────────────────────────────────────
+geometry
+{
+    uav.stl
+    {
+        type    triSurfaceMesh;
+        name    uav_wall;
+    }
+
+    // Refinement box: tight region around UAV body
+    box_near_body
+    {
+        type    searchableBox;
+        min     (-0.5 -1.8 -1.8);
+        max     ( 3.5  1.8  1.8);
+    }
+
+    // Shock cone: M=1.5 → Mach angle mu = asin(1/M) = 41.8 deg
+    // Cone half-angle of generated shock ~ 19–30 deg depending on body shape
+    // Conservative box captures the oblique shock system
+    box_shock_region
+    {
+        type    searchableBox;
+        min     (-1.5 -4.0 -4.0);
+        max     (10.0  4.0  4.0);
+    }
+
+    // Wake refinement downstream
+    box_wake
+    {
+        type    searchableBox;
+        min     ( 2.0 -2.5 -2.5);
+        max     (15.0  2.5  2.5);
+    }
+}
+
+// ── Castellated mesh ──────────────────────────────────────────────────────────
+castellatedMeshControls
+{
+    maxLocalCells       2000000;
+    maxGlobalCells      20000000;   // ~20 M cell budget — scale with RAM
+    minRefinementCells  10;
+    maxLoadUnbalance    0.10;
+    nCellsBetweenLevels 3;          // Smooth transitions between refinement levels
+
+    features
+    (
+        {
+            // Sharp edge mesh from surfaceFeatureExtract
+            file    "uav.eMesh";
+            level   6;              // Highest refinement on leading/trailing edges
+        }
+    );
+
+    refinementSurfaces
+    {
+        uav_wall
+        {
+            level       (5 6);      // Min level 5, max level 6 on UAV surface
+            patchInfo   { type wall; }
+        }
+    }
+
+    refinementRegions
+    {
+        box_near_body
+        {
+            mode    inside;
+            levels  ((1e15 4));     // Level 4 everywhere inside this box
+        }
+        box_shock_region
+        {
+            mode    inside;
+            levels  ((1e15 3));     // Level 3 — resolves oblique shocks
+        }
+        box_wake
+        {
+            mode    inside;
+            levels  ((1e15 2));     // Level 2 — coarser wake
+        }
+    }
+
+    // Point inside the fluid domain — must NOT be inside the UAV geometry
+    // Place upstream and above the UAV
+    locationInMesh (10.0 5.0 5.0);
+
+    allowFreeStandingZoneFaces  true;
+}
+
+// ── Snapping ──────────────────────────────────────────────────────────────────
+snapControls
+{
+    nSmoothPatch        5;
+    tolerance           4.0;            // Slightly relaxed for complex shapes
+    nSolveIter          300;
+    nRelaxIter          5;
+    nFeatureSnapIter    15;             // Extra snap iterations for edges
+    implicitFeatureSnap false;
+    explicitFeatureSnap true;           // Use uav.eMesh for edge snapping
+    multiRegionFeatureSnap false;
+}
+
+// ── Boundary layers ───────────────────────────────────────────────────────────
+addLayersControls
+{
+    relativeSizes   true;               // Thicknesses relative to local cell size
+
+    layers
+    {
+        uav_wall
+        {
+            nSurfaceLayers  6;          // 6 prism layers
+                                        // Increase to 10–12 for y+~1 (wall-resolved)
+        }
+    }
+
+    expansionRatio          1.3;        // Growth ratio between layers
+    finalLayerThickness     0.3;        // Outermost layer thickness / local cell size
+                                        // 0.3 → targets y+ 30–100 (wall functions)
+                                        // 0.05 → targets y+ ~1 (low-Re)
+    minThickness            0.01;       // Minimum layer thickness (relative)
+
+    // y+ estimation at Re_chord = 1.82e6:
+    //   delta_99 ~ 0.37 * L / Re^0.2 = 0.37 * 0.3 / (1.82e6)^0.2 = 0.0046 m
+    //   y1 for y+=30: y1 = 30 * nu / u_tau ~ 30 * 7.3e-5 / 22 = 9.9e-5 m (use ~1e-4 m)
+    //   y1 for y+=1:  y1 ~ 3.3e-6 m → requires much finer base mesh
+
+    nGrow                   0;
+    featureAngle            180;        // Add layers on all surface faces
+    slipFeatureAngle        30;
+    nRelaxIter              5;
+    nSmoothSurfaceNormals   1;
+    nSmoothNormals          3;
+    nSmoothThickness        10;
+    maxFaceThicknessRatio   0.5;
+    maxThicknessToMedialRatio 0.3;
+    minMedialAxisAngle      90;
+    nBufferCellsNoExtrude   0;
+    nLayerIter              50;
+    nRelaxedIter            20;
+}
+
+// ── Mesh quality ──────────────────────────────────────────────────────────────
+meshQualityControls
+{
+    #include "meshQualityDict"
+
+    // Allow reduced quality during layer addition
+    nSmoothScale    4;
+    errorReduction  0.75;
+}
+
+// Run parallel snappy write control
+writeFlags
+(
+    scalarLevels
+    snapProblems
+    layerInfo
+);
+
+mergeTolerance  1e-6;
