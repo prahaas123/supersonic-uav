@@ -32,7 +32,7 @@ geometry
     {
         type    searchableBox;
         min     (-0.5 -1.8 -1.8);
-        max     ( 3.5  1.8  1.8);
+        max     ( 4.5  1.8  1.8);
     }
 
     // Shock cone: M=1.5 → Mach angle mu = asin(1/M) = 41.8 deg
@@ -69,7 +69,7 @@ castellatedMeshControls
         {
             // Sharp edge mesh from surfaceFeatureExtract
             file    "uav.eMesh";
-            level   6;              // Highest refinement on leading/trailing edges
+            level   7;              // Highest refinement on leading/trailing edges
         }
     );
 
@@ -77,7 +77,7 @@ castellatedMeshControls
     {
         uav_wall
         {
-            level       (5 6);      // Min level 5, max level 6 on UAV surface
+            level       (6 7);      // Min level 6, max level 7 on UAV surface
             patchInfo   { type wall; }
         }
     }
@@ -87,17 +87,17 @@ castellatedMeshControls
         box_near_body
         {
             mode    inside;
-            levels  ((1e15 4));     // Level 4 everywhere inside this box
+            levels  ((1e15 5));     // Level 5 everywhere inside this box
         }
         box_shock_region
         {
             mode    inside;
-            levels  ((1e15 3));     // Level 3 — resolves oblique shocks
+            levels  ((1e15 4));     // Level 4 — resolves oblique shocks
         }
         box_wake
         {
             mode    inside;
-            levels  ((1e15 2));     // Level 2 — coarser wake
+            levels  ((1e15 4));     // Level 4 — coarser wake
         }
     }
 
@@ -135,26 +135,20 @@ addLayersControls
         }
     }
 
-    expansionRatio          1.3;        // Growth ratio between layers
+    expansionRatio          1.2;        // Growth ratio between layers
     finalLayerThickness     0.3;        // Outermost layer thickness / local cell size
                                         // 0.3 → targets y+ 30–100 (wall functions)
                                         // 0.05 → targets y+ ~1 (low-Re)
-    minThickness            0.01;       // Minimum layer thickness (relative)
-
-    // y+ estimation at Re_chord = 1.82e6:
-    //   delta_99 ~ 0.37 * L / Re^0.2 = 0.37 * 0.3 / (1.82e6)^0.2 = 0.0046 m
-    //   y1 for y+=30: y1 = 30 * nu / u_tau ~ 30 * 7.3e-5 / 22 = 9.9e-5 m (use ~1e-4 m)
-    //   y1 for y+=1:  y1 ~ 3.3e-6 m → requires much finer base mesh
-
+    minThickness            0.1;       // Minimum layer thickness (relative)
     nGrow                   0;
-    featureAngle            180;        // Add layers on all surface faces
+    featureAngle            130;        // Add layers on all surface faces
     slipFeatureAngle        30;
     nRelaxIter              5;
     nSmoothSurfaceNormals   1;
     nSmoothNormals          3;
     nSmoothThickness        10;
     maxFaceThicknessRatio   0.5;
-    maxThicknessToMedialRatio 0.3;
+    maxThicknessToMedialRatio 0.6;
     minMedialAxisAngle      90;
     nBufferCellsNoExtrude   0;
     nLayerIter              50;
