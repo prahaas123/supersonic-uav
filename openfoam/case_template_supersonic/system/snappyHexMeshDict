@@ -103,7 +103,7 @@ castellatedMeshControls
 
     // Point inside the fluid domain — must NOT be inside the UAV geometry
     // Place upstream and above the UAV
-    locationInMesh (10.0 5.0 5.0);
+    locationInMesh (7.3 3.7 3.3);
 
     allowFreeStandingZoneFaces  true;
 }
