@@ -62,6 +62,7 @@ castellatedMeshControls
     minRefinementCells  10;
     maxLoadUnbalance    0.10;
     nCellsBetweenLevels 3;          // Smooth transitions between refinement levels
+    resolveFeatureAngle 30;
 
     features
     (
@@ -169,13 +170,5 @@ meshQualityControls
     nSmoothScale    4;
     errorReduction  0.75;
 }
-
-// Run parallel snappy write control
-writeFlags
-(
-    scalarLevels
-    snapProblems
-    layerInfo
-);
 
 mergeTolerance  1e-6;
