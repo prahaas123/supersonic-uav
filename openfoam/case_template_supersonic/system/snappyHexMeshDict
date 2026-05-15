@@ -139,18 +139,18 @@ addLayersControls
     finalLayerThickness     0.3;        // Outermost layer thickness / local cell size
                                         // 0.3 → targets y+ 30–100 (wall functions)
                                         // 0.05 → targets y+ ~1 (low-Re)
-    minThickness            0.1;       // Minimum layer thickness (relative)
+    minThickness            0.15;       // Minimum layer thickness (relative)
     nGrow                   0;
-    featureAngle            130;        // Add layers on all surface faces
-    slipFeatureAngle        30;
+    featureAngle            60;
+    slipFeatureAngle        20;
     nRelaxIter              5;
-    nSmoothSurfaceNormals   1;
-    nSmoothNormals          3;
+    nSmoothSurfaceNormals   3;
+    nSmoothNormals          5;
     nSmoothThickness        10;
     maxFaceThicknessRatio   0.5;
-    maxThicknessToMedialRatio 0.3;
-    minMedialAxisAngle      90;
-    nBufferCellsNoExtrude   0;
+    maxThicknessToMedialRatio 0.6;
+    minMedialAxisAngle      85;
+    nBufferCellsNoExtrude   1;
     nLayerIter              50;
     nRelaxedIter            20;
 }

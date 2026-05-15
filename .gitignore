@@ -1,3 +1,5 @@
 /Background.MD
 notes*
 .vscode
+run_*
+*.log
