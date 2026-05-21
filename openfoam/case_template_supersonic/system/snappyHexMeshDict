@@ -135,7 +135,7 @@ addLayersControls
         }
     }
 
-    expansionRatio          1.2;        // Growth ratio between layers
+    expansionRatio          1.15;        // Growth ratio between layers
     finalLayerThickness     0.5;        // Outermost layer thickness / local cell size
                                         // 0.3 → targets y+ 30–100 (wall functions)
                                         // 0.05 → targets y+ ~1 (low-Re)
@@ -152,7 +152,7 @@ addLayersControls
     minMedialAxisAngle      85;
     nBufferCellsNoExtrude   1;
     nLayerIter              50;
-    nRelaxedIter            20;
+    nRelaxedIter            30;
 }
 
 // ── Mesh quality ──────────────────────────────────────────────────────────────
