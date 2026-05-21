@@ -59,5 +59,6 @@ minTwist            0.02;
 // Relaxed criteria used during layer addition
 relaxed
 {
-    maxNonOrtho     75;
+    maxNonOrtho     85;
+    minFaceWeight   0.01;
 }
