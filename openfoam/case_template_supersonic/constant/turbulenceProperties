@@ -10,7 +10,7 @@ FoamFile
     version     2.0;
     format      ascii;
     class       dictionary;
-    object      momentumTransport;
+    object      turbulenceProperties;
 }
 // ============================================================================
 
@@ -21,7 +21,6 @@ RAS
     // k-omega SST: best for M~1.5 with attached/mildly separated flow
     // Handles adverse pressure gradients well (wing, fin junctions)
     model           kOmegaSST;
-
     turbulence      on;
     printCoeffs     on;
 
