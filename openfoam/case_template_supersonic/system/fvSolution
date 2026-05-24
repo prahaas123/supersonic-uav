@@ -34,9 +34,4 @@ solvers
     }
 }
 
-wallDist
-{
-    method meshWave;
-}
-
 // No PISO or SIMPLE dicts needed for rhoCentralFoam
