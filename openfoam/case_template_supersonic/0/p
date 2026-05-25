@@ -46,9 +46,4 @@ boundaryField
         // Adiabatic wall — no normal pressure gradient
         type            zeroGradient;
     }
-
-    symmetryPlane
-    {
-        type            symmetryPlane;
-    }
 }

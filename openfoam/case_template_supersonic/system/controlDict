@@ -109,7 +109,7 @@ functions
     {
         type            pressure;
         libs            (fieldFunctionObjects);
-        mode            pressureCoefficient;
+        mode            staticCoeff;
         pInf            12112;
         UInf            (442.6 0 0);
         rhoInf          0.1948;
@@ -124,30 +124,6 @@ functions
         fields          (rho U p T k omega);
         writeControl    timeStep;
         writeInterval   1;
-    }
-
-    // ── Shock / flowfield probes ──────────────────────────────────────────────
-    probeShock
-    {
-        type            probes;
-        libs            (sampling);
-        writeControl    timeStep;
-        writeInterval   50;
-        fields          (p T rho MachNo U);
-
-        // Place probes along stagnation streamline and spanwise shock cone
-        // Adjust coordinates to match your UAV geometry
-        probeLocations
-        (
-            ( 0.05  0.0   0.0)   // nose stagnation
-            ( 0.50  0.0   0.0)   // fuselage midpoint
-            ( 1.00  0.25  0.0)   // wing leading edge region
-            ( 1.50  0.60  0.0)   // wing mid-chord
-            ( 2.50  0.0   0.0)   // aft fuselage
-            ( 4.00  0.0   0.0)   // near wake
-            ( 8.00  0.0   0.0)   // far wake
-            (-0.50  0.0   0.0)   // upstream (should stay at freestream)
-        );
     }
 
     // ── Surface pressure sampling (for Cp distribution) ───────────────────────
@@ -174,11 +150,9 @@ functions
             {
                 type        cuttingPlane;
                 planeType   pointAndNormal;
-                pointAndNormalDict
-                {
-                    point   (0 0 0);
-                    normal  (0 0 1);
-                }
+                planeType   pointAndNormal;
+                point       (0 0 0);
+                normal      (0 0 1);
                 interpolate true;
             }
         }

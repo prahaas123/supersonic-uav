@@ -47,9 +47,4 @@ boundaryField
         type            kqRWallFunction;
         value           uniform 0.295;
     }
-
-    symmetryPlane
-    {
-        type            symmetryPlane;
-    }
 }

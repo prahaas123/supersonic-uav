@@ -49,9 +49,4 @@ boundaryField
         type            nutUSpaldingWallFunction;
         value           uniform 0;
     }
-
-    symmetryPlane
-    {
-        type            symmetryPlane;
-    }
 }

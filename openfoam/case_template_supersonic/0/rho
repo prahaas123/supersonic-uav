@@ -46,9 +46,4 @@ boundaryField
     {
         type            zeroGradient;
     }
-
-    symmetryPlane
-    {
-        type            symmetryPlane;
-    }
 }

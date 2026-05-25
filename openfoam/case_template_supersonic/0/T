@@ -47,9 +47,4 @@ boundaryField
         // Switch to fixedValue for isothermal: value uniform 300; // [K]
         type            zeroGradient;
     }
-
-    symmetryPlane
-    {
-        type            symmetryPlane;
-    }
 }

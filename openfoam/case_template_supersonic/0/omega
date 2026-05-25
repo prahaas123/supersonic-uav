@@ -50,9 +50,4 @@ boundaryField
         type            omegaWallFunction;
         value           uniform 49400;
     }
-
-    symmetryPlane
-    {
-        type            symmetryPlane;
-    }
 }

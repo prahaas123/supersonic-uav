@@ -29,8 +29,11 @@ solvers
 
     "(k|omega)Final"
     {
-        $k;
-        relTol          0;          // Converge fully on final corrector
+        solver          PBiCGStab;
+        preconditioner  DILU;
+        tolerance       1e-8;
+        relTol          0;
+        maxIter         100;
     }
 }
 

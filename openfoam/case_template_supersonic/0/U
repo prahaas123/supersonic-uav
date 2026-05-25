@@ -48,9 +48,4 @@ boundaryField
     {
         type            noSlip;
     }
-
-    symmetryPlane
-    {
-        type            symmetryPlane;
-    }
 }
