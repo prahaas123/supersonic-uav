@@ -121,40 +121,8 @@ functions
     {
         type            solverInfo;
         libs            (utilityFunctionObjects);
-        fields          (rho U p T k omega);
+        fields          (k omega);
         writeControl    timeStep;
         writeInterval   1;
-    }
-
-    // ── Surface pressure sampling (for Cp distribution) ───────────────────────
-    surfaceSampling
-    {
-        type            surfaces;
-        libs            (sampling);
-        writeControl    writeTime;
-        interpolationScheme cellPoint;
-        surfaceFormat   vtk;
-        fields          (p Cp MachNo T);
-
-        surfaces
-        {
-            uav_surface
-            {
-                type        patch;
-                patches     (uav_wall);
-                triangulate false;
-            }
-
-            // Symmetry-plane cut for shock structure visualisation
-            sliceXY
-            {
-                type        cuttingPlane;
-                planeType   pointAndNormal;
-                planeType   pointAndNormal;
-                point       (0 0 0);
-                normal      (0 0 1);
-                interpolate true;
-            }
-        }
     }
 }
