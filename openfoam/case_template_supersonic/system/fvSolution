@@ -24,6 +24,36 @@ solvers
     {
         solver          diagonal;
     }
+
+    U
+    {
+        solver          smoothSolver;
+        smoother        symGaussSeidel;
+        tolerance       1e-8;
+        relTol          0.1;
+        maxIter         100;
+    }
+
+    UFinal
+    {
+        $U;
+        relTol          0;
+    }
+
+    e
+    {
+        solver          smoothSolver;
+        smoother        symGaussSeidel;
+        tolerance       1e-8;
+        relTol          0.1;
+    }
+
+    eFinal
+    {
+        $e;
+        relTol          0;
+    }
+
     "(k|omega)"
     {
         solver          PBiCGStab;
@@ -42,5 +72,3 @@ solvers
         maxIter         100;
     }
 }
-
-// No PISO or SIMPLE dicts needed for rhoCentralFoam
