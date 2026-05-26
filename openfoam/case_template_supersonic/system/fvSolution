@@ -12,12 +12,18 @@ FoamFile
     class       dictionary;
     object      fvSolution;
 }
-// ============================================================================
-// rhoCentralFoam is an explicit density-based solver — no PISO/SIMPLE loop.
-// Linear solvers are only needed for the turbulence equations (k, omega).
 
 solvers
 {
+    rho
+    {
+        solver          diagonal;
+    }
+
+    "(rhoU|rhoE)"
+    {
+        solver          diagonal;
+    }
     "(k|omega)"
     {
         solver          PBiCGStab;
