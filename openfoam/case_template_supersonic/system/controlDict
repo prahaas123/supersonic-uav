@@ -23,7 +23,7 @@ endTime         0.5;                // [s] Run until shockwaves stabilise
                                     // Typical convergence: 0.1–0.4 s physical time
                                     // Monitor postProcessing/forceCoeffs for plateau
 
-deltaT          1e-7;               // Initial timestep — adjustableRunTime grows it
+deltaT          1e-9;
 writeControl    adjustableRunTime;
 writeInterval   0.01;               // Write every 10 ms (50 snapshots total)
 purgeWrite      5;                  // Keep only 5 most recent time directories
@@ -36,8 +36,8 @@ runTimeModifiable yes;
 
 // ── Acoustic CFL control ──────────────────────────────────────────────────────
 adjustTimeStep  yes;
-maxCo           0.4;                // Acoustic CFL ≤ 0.5 required for shocks
-maxDeltaT       1e-6;               // Hard cap on timestep
+maxCo           0.1;
+maxDeltaT       5e-7; 
 
 // ── Function objects ──────────────────────────────────────────────────────────
 functions
