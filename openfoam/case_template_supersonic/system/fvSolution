@@ -72,3 +72,9 @@ solvers
         maxIter         100;
     }
 }
+
+thermostat
+{
+    Tlow    100;    // hard lower bound [K] — prevents T going negative
+    Thigh   4000;   // hard upper bound [K]
+}

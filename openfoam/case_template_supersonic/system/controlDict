@@ -36,8 +36,8 @@ runTimeModifiable yes;
 
 // ── Acoustic CFL control ──────────────────────────────────────────────────────
 adjustTimeStep  yes;
-maxCo           0.1;
-maxDeltaT       5e-7; 
+maxCo           0.4;
+maxDeltaT       1e-6;
 
 // ── Function objects ──────────────────────────────────────────────────────────
 functions
