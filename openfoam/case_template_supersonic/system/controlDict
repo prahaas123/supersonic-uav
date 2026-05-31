@@ -15,34 +15,27 @@ FoamFile
 // ============================================================================
 
 application     rhoCentralFoam;
-
-startFrom       latestTime;         // Resume from last checkpoint
+startFrom       latestTime;
 startTime       0;
 stopAt          endTime;
-endTime         0.5;                // [s] Run until shockwaves stabilise
-                                    // Typical convergence: 0.1–0.4 s physical time
-                                    // Monitor postProcessing/forceCoeffs for plateau
-
-deltaT          1e-9;
-writeControl    adjustableRunTime;
-writeInterval   0.01;               // Write every 10 ms (50 snapshots total)
-purgeWrite      5;                  // Keep only 5 most recent time directories
-writeFormat     binary;             // Faster I/O for large meshes
-writePrecision  8;
+endTime         1e-3;
+deltaT          1e-7;
+writeControl    adjustable;
+writeInterval   5e-5;
+purgeWrite      0;
+writeFormat     binary;
+writePrecision  15;
 writeCompression off;
 timeFormat      general;
-timePrecision   8;
-runTimeModifiable yes;
-
-// ── Acoustic CFL control ──────────────────────────────────────────────────────
+timePrecision   6;
+runTimeModifiable true;
 adjustTimeStep  yes;
-maxCo           0.4;
-maxDeltaT       1e-6;
+maxCo           0.5;
+maxDeltaT       2e-8;
 
-// ── Function objects ──────────────────────────────────────────────────────────
 functions
 {
-    // ── Force coefficients: CL, CD, CM ────────────────────────────────────────
+    // Force coefficients: CL, CD, CM
     forceCoeffs
     {
         type            forceCoeffs;
@@ -55,15 +48,15 @@ functions
 
         // Freestream reference values
         rho             rhoInf;
-        rhoInf          0.1948;     // [kg/m3] ISA @ 15000 m
-        pRef            12112;      // [Pa]    ISA @ 15000 m
+        rhoInf          0.1948;     // [kg/m3]
+        pRef            12112;      // [Pa]
 
-        // Aerodynamic axes — zero AoA baseline (+X flow)
+        // Aerodynamic axes
         liftDir         (0 1 0);    // +Y = lift direction
         dragDir         (1 0 0);    // +X = drag direction
         pitchAxis       (0 0 1);    // +Z = pitch moment axis
 
-        // Reference geometry — ADJUST TO YOUR UAV
+        // Reference geometry
         CofR            (0.5 0.0 0.0);  // Centre of rotation / gravity [m]
         magUInf         442.6;          // Freestream speed [m/s]
         lRef            0.30;           // Reference chord length [m]
@@ -71,7 +64,6 @@ functions
                                         // (full span; halve for half-body cases)
     }
 
-    // ── Raw forces and moments ────────────────────────────────────────────────
     forces
     {
         type            forces;
@@ -87,7 +79,6 @@ functions
         CofR            (0.5 0.0 0.0);
     }
 
-    // ── Wall y+ ───────────────────────────────────────────────────────────────
     yPlus
     {
         type            yPlus;
@@ -96,7 +87,6 @@ functions
         patches         (uav_wall);
     }
 
-    // ── Mach number field ─────────────────────────────────────────────────────
     MachNo
     {
         type            MachNo;
@@ -104,7 +94,6 @@ functions
         writeControl    writeTime;
     }
 
-    // ── Pressure coefficient field ────────────────────────────────────────────
     Cp
     {
         type            pressure;
@@ -116,7 +105,6 @@ functions
         writeControl    writeTime;
     }
 
-    // ── Residual monitor ──────────────────────────────────────────────────────
     residuals
     {
         type            solverInfo;

@@ -1,8 +1,8 @@
 /*--------------------------------*- C++ -*----------------------------------*\
 | =========                 |                                                 |
 | \\      /  F ield         | OpenFOAM: The Open Source CFD Toolbox           |
-|  \\    /   O peration     | Version: v2312                                  |
-|   \\  /    A nd           | Web: www.openfoam.com                           |
+|  \\    /   O peration     | Version:  v2312                                 |
+|   \\  /    A nd           | Website:  www.openfoam.com                      |
 |    \\/     M anipulation  |                                                 |
 \*---------------------------------------------------------------------------*/
 FoamFile
@@ -12,15 +12,11 @@ FoamFile
     class       dictionary;
     object      fvSolution;
 }
+// * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * //
 
 solvers
 {
-    rho
-    {
-        solver          diagonal;
-    }
-
-    "(rhoU|rhoE)"
+    "(rho|rhoU|rhoE)"
     {
         solver          diagonal;
     }
@@ -28,30 +24,16 @@ solvers
     U
     {
         solver          smoothSolver;
-        smoother        symGaussSeidel;
-        tolerance       1e-8;
-        relTol          0.1;
-        maxIter         100;
-    }
-
-    UFinal
-    {
-        $U;
-        relTol          0;
+        smoother        GaussSeidel;
+        nSweeps         2;
+        tolerance       1e-09;
+        relTol          0.01;
     }
 
     e
     {
-        solver          smoothSolver;
-        smoother        symGaussSeidel;
-        tolerance       1e-8;
+        $U;
         relTol          0.1;
-    }
-
-    eFinal
-    {
-        $e;
-        relTol          0;
     }
 
     "(k|omega)"
@@ -63,18 +45,13 @@ solvers
         maxIter         100;
     }
 
-    "(k|omega)Final"
-    {
-        solver          PBiCGStab;
-        preconditioner  DILU;
-        tolerance       1e-8;
-        relTol          0;
-        maxIter         100;
-    }
+    "(k|omega)Final" { $k; relTol 0; }
 }
 
-thermostat
+wallDist
 {
-    Tlow    100;    // hard lower bound [K] — prevents T going negative
-    Thigh   4000;   // hard upper bound [K]
+    method meshWave;
 }
+
+
+// ************************************************************************* //

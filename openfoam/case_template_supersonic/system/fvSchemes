@@ -1,8 +1,8 @@
 /*--------------------------------*- C++ -*----------------------------------*\
 | =========                 |                                                 |
 | \\      /  F ield         | OpenFOAM: The Open Source CFD Toolbox           |
-|  \\    /   O peration     | Version: v2312                                  |
-|   \\  /    A nd           | Web: www.openfoam.com                           |
+|  \\    /   O peration     | Version:  v2312                                 |
+|   \\  /    A nd           | Website:  www.openfoam.com                      |
 |    \\/     M anipulation  |                                                 |
 \*---------------------------------------------------------------------------*/
 FoamFile
@@ -12,38 +12,26 @@ FoamFile
     class       dictionary;
     object      fvSchemes;
 }
-// ============================================================================
-// NOTE: rhoCentralFoam uses its own internal Kurganov-Tadmor (KT) central-upwind
-// flux scheme for the main flow equations (rho, rhoU, rhoE).
-// The schemes below apply only to the turbulence transport equations (k, omega).
+// * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * //
+
+fluxScheme          Kurganov;
 
 ddtSchemes
 {
-    default         Euler;              // First-order time; sufficient for
-                                        // marching to steady state
+    default         localEuler;
 }
 
 gradSchemes
 {
     default         Gauss linear;
-    grad(U)         cellLimited Gauss linear 1;
-    grad(k)         cellLimited Gauss linear 1;
-    grad(omega)     cellLimited Gauss linear 1;
 }
 
 divSchemes
 {
     default         none;
-
-    // Turbulence transport — limited upwind for boundedness
-    div(phi,k)              Gauss linearUpwind grad(k);
-    div(phi,omega)          Gauss linearUpwind grad(omega);
-
-    // Viscous work term
-    div(tauMC)              Gauss linear;
-
-    // Turbulent kinetic energy convection
-    div(phi,K)              Gauss linearUpwind default;
+    div(tauMC)      Gauss linear;
+    div(phi,k)      Gauss upwind;
+    div(phi,omega)  Gauss upwind;
 }
 
 laplacianSchemes
@@ -53,13 +41,11 @@ laplacianSchemes
 
 interpolationSchemes
 {
-    default             linear;
+    default         linear;
 
-    // TVD reconstruction for the central solver — critical for sharp shocks
-    reconstruct(rho)    vanLeer;        // Density
-    reconstruct(U)      vanLeerV;       // Velocity (vector TVD)
-    reconstruct(T)      vanLeer;        // Temperature
-    reconstruct(p)      vanLeer;        // Pressure (derived quantity)
+    reconstruct(rho) vanLeer;
+    reconstruct(U)  vanLeerV;
+    reconstruct(T)  vanLeer;
 }
 
 snGradSchemes
@@ -67,13 +53,9 @@ snGradSchemes
     default         corrected;
 }
 
-fluxRequired
-{
-    default         no;
-    p               ;
-}
-
 wallDist
 {
     method meshWave;
 }
+
+// ************************************************************************* //

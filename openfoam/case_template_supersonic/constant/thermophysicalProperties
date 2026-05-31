@@ -1,8 +1,8 @@
 /*--------------------------------*- C++ -*----------------------------------*\
 | =========                 |                                                 |
 | \\      /  F ield         | OpenFOAM: The Open Source CFD Toolbox           |
-|  \\    /   O peration     | Version: v2312                                  |
-|   \\  /    A nd           | Web: www.openfoam.com                           |
+|  \\    /   O peration     | Version:  v2312                                 |
+|   \\  /    A nd           | Website:  www.openfoam.com                      |
 |    \\/     M anipulation  |                                                 |
 \*---------------------------------------------------------------------------*/
 FoamFile
@@ -12,14 +12,14 @@ FoamFile
     class       dictionary;
     object      thermophysicalProperties;
 }
-// ============================================================================
+// * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * //
 
 thermoType
 {
-    type            hePsiThermo;        // Compressible thermo using psi = 1/(RT)
+    type            hePsiThermo;
     mixture         pureMixture;
-    transport       sutherland;         // Sutherland viscosity law
-    thermo          hConst;             // Constant Cp (valid for M~1.5 range)
+    transport       sutherland;
+    thermo          janaf;
     equationOfState perfectGas;
     specie          specie;
     energy          sensibleInternalEnergy;
@@ -29,20 +29,41 @@ mixture
 {
     specie
     {
-        molWeight       28.96;          // Air [g/mol]
+        molWeight       28.96;
     }
-
     thermodynamics
     {
-        Cp              1005;           // Specific heat at constant pressure [J/(kg K)]
-        Hf              0;              // Heat of formation [J/kg] — zero for air
+        Tlow            100;
+        Thigh           10000;
+        Tcommon         1000;
+        highCpCoeffs
+        (
+            2.9525407
+            0.0013968838
+            -4.9262577e-07
+            7.8600091e-11
+            -4.6074978e-15
+            -923.93753
+            5.8718221
+        );
+        lowCpCoeffs
+        (
+            3.5309628
+            -0.0001236595
+            -5.0299339e-07
+            2.4352768e-09
+            -1.4087954e-12
+            -1046.9637
+            2.9674391
+        );
     }
-
     transport
     {
-        // Sutherland law: mu = As * sqrt(T) / (1 + Ts/T)
-        // Calibrated for dry air
-        As              1.458e-06;      // [kg/(m s K^0.5)]
-        Ts              110.4;          // Sutherland temperature [K]
+        As              1.458e-06;
+        Ts              110;
+        Pr              0.72;
     }
 }
+
+
+// ************************************************************************* //
