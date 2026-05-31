@@ -18,8 +18,8 @@ application     rhoCentralFoam;
 startFrom       latestTime;
 startTime       0;
 stopAt          endTime;
-endTime         1e-3;
-deltaT          1e-7;
+endTime         1e-2;
+deltaT          2e-8;
 writeControl    adjustable;
 writeInterval   5e-5;
 purgeWrite      0;
@@ -30,12 +30,11 @@ timeFormat      general;
 timePrecision   6;
 runTimeModifiable true;
 adjustTimeStep  yes;
-maxCo           0.5;
-maxDeltaT       2e-8;
+maxCo           0.3;
+maxDeltaT       1e-7;
 
 functions
 {
-    // Force coefficients: CL, CD, CM
     forceCoeffs
     {
         type            forceCoeffs;
@@ -43,7 +42,6 @@ functions
         writeControl    timeStep;
         writeInterval   10;
         log             true;
-
         patches         (uav_wall);
 
         // Freestream reference values
@@ -61,7 +59,6 @@ functions
         magUInf         442.6;          // Freestream speed [m/s]
         lRef            0.30;           // Reference chord length [m]
         Aref            0.60;           // Reference planform area [m2]
-                                        // (full span; halve for half-body cases)
     }
 
     forces
