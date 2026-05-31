@@ -19,10 +19,10 @@ startFrom       latestTime;
 startTime       0;
 stopAt          endTime;
 endTime         1e-2;
-deltaT          2e-8;
+deltaT          1e-8;
 writeControl    adjustable;
-writeInterval   5e-5;
-purgeWrite      0;
+writeInterval   1e-3;
+purgeWrite      2;
 writeFormat     binary;
 writePrecision  15;
 writeCompression off;
@@ -30,8 +30,8 @@ timeFormat      general;
 timePrecision   6;
 runTimeModifiable true;
 adjustTimeStep  yes;
-maxCo           0.3;
-maxDeltaT       1e-7;
+maxCo           0.5;
+maxDeltaT       1e-4;
 
 functions
 {

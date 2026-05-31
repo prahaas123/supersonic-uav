@@ -18,20 +18,20 @@ fluxScheme          Kurganov;
 
 ddtSchemes
 {
-    default         localEuler;
+    default         Euler;
 }
 
 gradSchemes
 {
-    default         Gauss linear;
+    default         cellLimited Gauss linear 1;
 }
 
 divSchemes
 {
     default         none;
     div(tauMC)      Gauss linear;
-    div(phi,k)      Gauss upwind;
-    div(phi,omega)  Gauss upwind;
+    div(phi,k)      bounded Gauss upwind;
+    div(phi,omega)  bounded Gauss upwind;
 }
 
 laplacianSchemes
