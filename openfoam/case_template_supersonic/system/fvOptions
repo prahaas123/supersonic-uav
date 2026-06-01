@@ -10,51 +10,15 @@ FoamFile
     version     2.0;
     format      ascii;
     class       dictionary;
-    object      fvSchemes;
+    object      fvOptions;
 }
 // * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * //
 
-fluxScheme          Kurganov;
-
-ddtSchemes
+limitT
 {
-    default         Euler;
+    type            limitTemperature;
+    active          true;
+    selectionMode   all;
+    min             110.0;
+    max             4000.0;
 }
-
-gradSchemes
-{
-    default         cellMDLimited Gauss linear 1;
-}
-
-divSchemes
-{
-    default         none;
-    div(tauMC)      Gauss linear;
-    div(phi,k)      bounded Gauss upwind;
-    div(phi,omega)  bounded Gauss upwind;
-}
-
-laplacianSchemes
-{
-    default         Gauss linear limited 0.5;
-}
-
-interpolationSchemes
-{
-    default         linear;
-    reconstruct(rho) vanLeer;
-    reconstruct(U)  vanLeerV;
-    reconstruct(T)  vanLeer;
-}
-
-snGradSchemes
-{
-    default         limited 0.5;
-}
-
-wallDist
-{
-    method meshWave;
-}
-
-// ************************************************************************* //
