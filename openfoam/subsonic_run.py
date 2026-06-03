@@ -91,7 +91,7 @@ def initialize_results_csv():
 
 def prepare(job_directory, processors_per_job, cg, u, c, S, num_iterations):
     try:
-        case_template = SolutionDirectory("case_template")
+        case_template = SolutionDirectory("case_template_subsonic")
         case_template.cloneCase(job_directory)
         
         # decomposParDict
