@@ -1,9 +1,9 @@
-/*--------------------------------*- C++ -*----------------------------------*\
-| =========                 |                                                 |
-| \\      /  F ield         | OpenFOAM: The Open Source CFD Toolbox           |
-|  \\    /   O peration     | Version: v2312                                  |
-|   \\  /    A nd           | Web: www.openfoam.com                           |
-|    \\/     M anipulation  |                                                 |
+/*--------------------------------*- C# -*------ ----------------------------*\
+  =========                 |
+  \\      /  F ield         | OpenFOAM: The Open Source CFD Toolbox
+   \\    /   O peration     | Website:  www.openfoam.com
+    \\  /    A nd           | Version:  v2312
+     \\/     M anipulation  |
 \*---------------------------------------------------------------------------*/
 FoamFile
 {
@@ -12,18 +12,16 @@ FoamFile
     class       dictionary;
     object      blockMeshDict;
 }
-// ============================================================================
+// * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * //
 
-scale 1;
+scale   1;
 
 vertices
 (
-    // Bottom face (Z = -10)
     (-10 -10 -10)   //  0
     ( 20 -10 -10)   //  1
     ( 20  10 -10)   //  2
     (-10  10 -10)   //  3
-    // Top face (Z = +10)
     (-10 -10  10)   //  4
     ( 20 -10  10)   //  5
     ( 20  10  10)   //  6
@@ -34,6 +32,9 @@ blocks
 (
     hex (0 1 2 3 4 5 6 7) (60 40 20) simpleGrading (1 1 1)
 );
+
+edges
+();
 
 boundary
 (
