@@ -130,7 +130,7 @@ def prepare(job_directory, processors_per_job, cg, u, c, S, num_iterations):
 
 def mesh(job_directory, alpha, processors_per_job):
     COMMANDS = [
-        f"surfaceTransformPoints -rotate-angle '((0 1 0) {alpha})' Wing.stl {job_directory}/constant/triSurface/Wing.stl",
+        f"surfaceTransformPoints -rotate-angle '((0 1 0) {alpha})' uav.stl {job_directory}/constant/triSurface/uav.stl",
         f"surfaceFeatureExtract -case {job_directory}",
         f"blockMesh -case {job_directory}",
         f"decomposePar -case {job_directory}",
