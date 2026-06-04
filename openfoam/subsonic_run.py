@@ -24,7 +24,7 @@ def main():
     initialize_results_csv()
 
     for alpha in alphas:
-        job_id = f"run_alpha_{int(alpha)}"
+        job_id = f"subsonic_alpha_{int(alpha)}"
         job_directory = f"./{job_id}"
         
         print(f"\n{'='*40}")
