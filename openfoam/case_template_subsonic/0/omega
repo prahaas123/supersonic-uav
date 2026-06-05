@@ -50,13 +50,10 @@ boundaryField
     {
         type            slip;
     }
-    Wing
+    uav
     {
         type            omegaWallFunction;
         value           uniform 0;
     }
 
 }
-
-
-// ************************************************************************* //

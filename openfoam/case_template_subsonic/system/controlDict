@@ -55,7 +55,7 @@ functions
         writeControl    timeStep;
         writeInterval   1;
         log             yes;
-        patches         (Wing);
+        patches         (uav);
         rho             rhoInf;
         rhoInf          1.225;
         liftDir         (0 0 1);
@@ -78,7 +78,7 @@ functions
     {
         type            wallShearStress;
         libs            (fieldFunctionObjects);
-        patches         (Wing); 
+        patches         (uav); 
         writeToFile     true;
         writeControl    timeStep;
         writeInterval   50;
@@ -90,7 +90,7 @@ functions
         libs        ("libforces.so");
         writeControl    timeStep;
         writeInterval   1;
-        patches     (Wing);          
+        patches     (uav);          
         p           p;
         U           U;
         rho         rhoInf;           

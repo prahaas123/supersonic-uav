@@ -14,7 +14,7 @@ FoamFile
 }
 // * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * //
 
-Wing.stl
+uav.stl
 {
     extractionMethod    extractFromSurface;
     extractFeaturesByAngle true;

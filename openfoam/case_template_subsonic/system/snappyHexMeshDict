@@ -20,7 +20,7 @@ geometry
     Wing.stl
     {
         type triSurfaceMesh;
-        name Wing;
+        name uav;
     }
     wakeRegion
     {
@@ -40,12 +40,12 @@ castellatedMeshControls
 
     features
     (
-        { file "Wing.eMesh"; level 7; }
+        { file "uav.eMesh"; level 7; }
     );
 
     refinementSurfaces
     {
-        Wing
+        uav
         {
             level (8 9);
             patchInfo { type wall; }
@@ -84,7 +84,7 @@ addLayersControls
     relativeSizes true;
     layers
     {
-        Wing
+        uav
         {
             nSurfaceLayers 8;
         }

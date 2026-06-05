@@ -49,12 +49,9 @@ boundaryField
     {
         type            zeroGradient;
     }
-    Wing
+    uav
     {
         type            zeroGradient;
     }
 
 }
-
-
-// ************************************************************************* //

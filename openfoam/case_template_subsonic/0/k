@@ -51,7 +51,7 @@ boundaryField
     {
         type            slip;
     }
-    Wing
+    uav
     {
         type            kqRWallFunction;
         value           uniform 0;
