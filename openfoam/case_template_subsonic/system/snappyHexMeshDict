@@ -17,7 +17,7 @@ addLayers       true;
 
 geometry
 {
-    Wing.stl
+    uav.stl
     {
         type triSurfaceMesh;
         name uav;
