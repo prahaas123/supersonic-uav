@@ -4,10 +4,10 @@ from matplotlib.widgets import Slider
 
 # Inputs
 MTOW = 18.7              # Maximum Takeoff Weight (kg)
-ENGINE_WEIGHT = 2.65     # Engine weight (kg)
+ENGINE_WEIGHT = 4.38     # Engine weight (kg)
 FUEL_FLOW = 0.00615      # Fuel flow rate (kg/s)
 
-INIT_STRUCT_WEIGHT = 4.5 # Default structural weight (kg)
+INIT_STRUCT_WEIGHT = 4.0 # Default structural weight (kg)
 
 def calculate_available_mass(struct_wt):
     return MTOW - ENGINE_WEIGHT - struct_wt
