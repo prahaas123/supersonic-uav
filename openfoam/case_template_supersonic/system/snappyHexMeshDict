@@ -18,7 +18,6 @@ castellatedMesh true;
 snap            true;
 addLayers       true;
 
-// ── Geometry ──────────────────────────────────────────────────────────────────
 geometry
 {
     uav.stl
@@ -27,7 +26,6 @@ geometry
         name    uav_wall;
     }
 
-    // Refinement box: tight region around UAV body
     box_near_body
     {
         type    searchableBox;
@@ -35,9 +33,6 @@ geometry
         max     ( 4.5  1.8  1.8);
     }
 
-    // Shock cone: M=1.5 → Mach angle mu = asin(1/M) = 41.8 deg
-    // Cone half-angle of generated shock ~ 19–30 deg depending on body shape
-    // Conservative box captures the oblique shock system
     box_shock_region
     {
         type    searchableBox;
@@ -45,7 +40,6 @@ geometry
         max     (10.0  4.0  4.0);
     }
 
-    // Wake refinement downstream
     box_wake
     {
         type    searchableBox;
@@ -54,30 +48,28 @@ geometry
     }
 }
 
-// ── Castellated mesh ──────────────────────────────────────────────────────────
 castellatedMeshControls
 {
     maxLocalCells       2000000;
-    maxGlobalCells      20000000;   // ~20 M cell budget — scale with RAM
+    maxGlobalCells      20000000;
     minRefinementCells  10;
     maxLoadUnbalance    0.10;
-    nCellsBetweenLevels 3;          // Smooth transitions between refinement levels
+    nCellsBetweenLevels 3;
     resolveFeatureAngle 30;
 
     features
     (
         {
-            // Sharp edge mesh from surfaceFeatureExtract
             file    "uav.eMesh";
-            level   8;              // Highest refinement on leading/trailing edges
+            level   8;
         }
     );
 
     refinementSurfaces
     {
-        uav_wall
+        uav
         {
-            level       (8 9);      // Min level 8, max level 9 on UAV surface
+            level       (8 9);
             patchInfo   { type wall; }
         }
     }
@@ -101,45 +93,38 @@ castellatedMeshControls
         }
     }
 
-    // Point inside the fluid domain — must NOT be inside the UAV geometry
-    // Place upstream and above the UAV
     locationInMesh (7.3 3.7 3.3);
 
     allowFreeStandingZoneFaces  true;
 }
 
-// ── Snapping ──────────────────────────────────────────────────────────────────
 snapControls
 {
     nSmoothPatch        5;
-    tolerance           4.0;            // Slightly relaxed for complex shapes
+    tolerance           4.0;
     nSolveIter          300;
     nRelaxIter          5;
-    nFeatureSnapIter    15;             // Extra snap iterations for edges
+    nFeatureSnapIter    15;
     implicitFeatureSnap false;
-    explicitFeatureSnap true;           // Use uav.eMesh for edge snapping
+    explicitFeatureSnap true;
     multiRegionFeatureSnap false;
 }
 
-// ── Boundary layers ───────────────────────────────────────────────────────────
 addLayersControls
 {
-    relativeSizes   true;               // Thicknesses relative to local cell size
+    relativeSizes   true;
 
     layers
     {
-        uav_wall
+        uav
         {
-            nSurfaceLayers  10;         // 10 prism layers
-                                        // Increase to 10–12 for y+~1 (wall-resolved)
+            nSurfaceLayers  10;
         }
     }
 
-    expansionRatio          1.15;        // Growth ratio between layers
-    finalLayerThickness     0.5;        // Outermost layer thickness / local cell size
-                                        // 0.3 → targets y+ 30–100 (wall functions)
-                                        // 0.05 → targets y+ ~1 (low-Re)
-    minThickness            0.15;       // Minimum layer thickness (relative)
+    expansionRatio          1.15;
+    finalLayerThickness     0.5;
+    minThickness            0.15;
     nGrow                   0;
     featureAngle            60;
     slipFeatureAngle        20;
@@ -155,14 +140,24 @@ addLayersControls
     nRelaxedIter            30;
 }
 
-// ── Mesh quality ──────────────────────────────────────────────────────────────
 meshQualityControls
 {
-    #include "meshQualityDict"
-
-    // Allow reduced quality during layer addition
-    nSmoothScale    4;
-    errorReduction  0.75;
+    maxNonOrtho 60;
+    maxBoundarySkewness 20;
+    maxInternalSkewness 4;
+    maxConcave 80;
+    minFlatness 0.5;
+    minVol 1e-13;
+    minTetQuality 1e-30;
+    minArea -1;
+    minTwist 0.02;
+    minDeterminant 0.001;
+    minFaceWeight 0.05;
+    minVolRatio 0.01;
+    triangleTwist true;
+    nSmoothScale 4;
+    errorReduction 0.75;
+    minTriangleTwist -1;
 }
 
 mergeTolerance  1e-6;

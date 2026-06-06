@@ -14,21 +14,16 @@ FoamFile
 }
 // ============================================================================
 
-// omega = sqrt(k) / (Cmu^0.25 * L_mix)
-//       = sqrt(0.295) / (0.09^0.25 * 0.02)
-//       = 0.5431 / (0.5477 * 0.02)
-//       = 49,580 s^-1
-// L_mix = 0.02 m (1% of wingspan — free-stream mixing length estimate)
+#include        "0/include/freeStreamVars"
 dimensions      [0 0 -1 0 0 0 0];
-
-internalField   uniform 49400;
+internalField   uniform $omegaInf;
 
 boundaryField
 {
     inlet
     {
         type            fixedValue;
-        value           uniform 49400;
+        value           uniform $omegaInf;
     }
 
     outlet
@@ -36,18 +31,15 @@ boundaryField
         type            zeroGradient;
     }
 
-    farfield_top
+    farfields
     {
         type            freestream;
-        freestreamValue uniform 49400;
+        freestreamValue uniform $omegaInf;
     }
 
-    farfield_bottom { $farfield_top; }
-    farfield_sides  { $farfield_top; }
-
-    uav_wall
+    uav
     {
         type            omegaWallFunction;
-        value           uniform 49400;
+        value           uniform $omegaInf;
     }
 }

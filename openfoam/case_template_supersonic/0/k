@@ -14,18 +14,16 @@ FoamFile
 }
 // ============================================================================
 
-// k = 1.5 * (TI * U_inf)^2 = 1.5 * (0.001 * 442.6)^2 = 0.295 m2/s2
-// TI = 0.1% — typical high-altitude freestream turbulence
+#include        "0/include/freeStreamVars"
 dimensions      [0 2 -2 0 0 0 0];
-
-internalField   uniform 0.295;
+internalField   uniform $kinf;
 
 boundaryField
 {
     inlet
     {
         type            fixedValue;
-        value           uniform 0.295;
+        value           uniform $kinf;
     }
 
     outlet
@@ -33,18 +31,15 @@ boundaryField
         type            zeroGradient;
     }
 
-    farfield_top
+    farfield
     {
         type            freestream;
-        freestreamValue uniform 0.295;
+        freestreamValue uniform $kinf;
     }
 
-    farfield_bottom { $farfield_top; }
-    farfield_sides  { $farfield_top; }
-
-    uav_wall
+    uav
     {
         type            kqRWallFunction;
-        value           uniform 0.295;
+        value           uniform $kinf;
     }
 }

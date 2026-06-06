@@ -42,7 +42,7 @@ functions
         writeControl    timeStep;
         writeInterval   10;
         log             true;
-        patches         (uav_wall);
+        patches         (uav);
 
         // Freestream reference values
         rho             rhoInf;
@@ -69,7 +69,7 @@ functions
         writeInterval   10;
         log             true;
 
-        patches         (uav_wall);
+        patches         (uav);
         rho             rhoInf;
         rhoInf          0.1948;
         pRef            12112;
@@ -81,7 +81,7 @@ functions
         type            yPlus;
         libs            (fieldFunctionObjects);
         writeControl    writeTime;
-        patches         (uav_wall);
+        patches         (uav);
     }
 
     MachNo

@@ -14,17 +14,16 @@ FoamFile
 }
 // ============================================================================
 
-// ISA @ 15000 m: p = 12112 Pa
+#include        "0/include/freeStreamVars"
 dimensions      [1 -1 -2 0 0 0 0];
-
-internalField   uniform 12112;
+internalField   uniform $pInf;
 
 boundaryField
 {
     inlet
     {
         type            fixedValue;
-        value           uniform 12112;
+        value           uniform $pInf;
     }
 
     outlet
@@ -32,18 +31,14 @@ boundaryField
         type            zeroGradient;
     }
 
-    farfield_top
+    farfield
     {
         type            freestreamPressure;
-        freestreamValue uniform 12112;
+        freestreamValue uniform $pInf;
     }
 
-    farfield_bottom { $farfield_top; }
-    farfield_sides  { $farfield_top; }
-
-    uav_wall
+    uav
     {
-        // Adiabatic wall — no normal pressure gradient
         type            zeroGradient;
     }
 }

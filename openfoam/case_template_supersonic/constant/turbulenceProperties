@@ -18,24 +18,7 @@ simulationType  RAS;
 
 RAS
 {
-    // k-omega SST: best for M~1.5 with attached/mildly separated flow
-    // Handles adverse pressure gradients well (wing, fin junctions)
     model           kOmegaSST;
     turbulence      on;
     printCoeffs     on;
-
-    // Default SST coefficients (Menter 1994) — do not change unless calibrated
-    // alphaK1     0.85;
-    // alphaK2     1.0;
-    // alphaOmega1 0.5;
-    // alphaOmega2 0.856;
-    // beta1       0.075;
-    // beta2       0.0828;
-    // betaStar    0.09;
-    // gamma1      0.5532;
-    // gamma2      0.4403;
-    // a1          0.31;
-    // b1          1.0;
-    // c1          10.0;
-    // F3          no;
 }

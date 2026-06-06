@@ -14,37 +14,31 @@ FoamFile
 }
 // ============================================================================
 
+#include        "0/include/freeStreamVars"
 dimensions      [0 1 -1 0 0 0 0];
-
-// M=1.5 @ 15000m: U_inf = 442.6 m/s along +X (zero AoA baseline)
-// For AoA sweep: U = (442.6*cos(AoA) 442.6*sin(AoA) 0)
-internalField   uniform (442.6 0 0);
+internalField   uniform $UInf;
 
 boundaryField
 {
     inlet
     {
-        // Supersonic inlet: all variables must be fixed
-        type            fixedValue;
-        value           uniform (442.6 0 0);
+        type            freestreamVelocity;
+        freestreamValue uniform $UInf;
     }
 
     outlet
     {
-        // Supersonic outlet: no upstream wave propagation
-        type            zeroGradient;
+        type            freestreamVelocity;
+        freestreamValue uniform $UInf;
     }
 
-    farfield_top
+    farfield
     {
         type            freestreamVelocity;
-        freestreamValue uniform (442.6 0 0);
+        freestreamValue uniform $UInf;
     }
 
-    farfield_bottom { $farfield_top; }
-    farfield_sides  { $farfield_top; }
-
-    uav_wall
+    uav
     {
         type            noSlip;
     }

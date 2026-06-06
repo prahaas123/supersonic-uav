@@ -13,9 +13,6 @@ FoamFile
     object      surfaceFeatureExtractDict;
 }
 // ============================================================================
-// Extracts sharp edges from the STL for snappyHexMesh to snap to.
-// Run with: surfaceFeatureExtract (from case root)
-// Output: constant/geometry/uav.eMesh
 
 uav.stl
 {
@@ -23,19 +20,8 @@ uav.stl
 
     extractFromSurfaceCoeffs
     {
-        // Extract edges where adjacent faces meet at included angle < 150 deg
-        // This captures: leading edges, trailing edges, fin roots, wing-body junction
-        // Increase angle (e.g. 160) for more aggressive edge detection
         includedAngle   150;
     }
 
-    // Write .obj file for inspection in ParaView / Blender
     writeObj            yes;
-
-    // Subset only the surface regions of interest (leave empty for all)
-    // subsetFeatures
-    // {
-    //     nonManifoldEdges    no;
-    //     openEdges           yes;
-    // }
 }

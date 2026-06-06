@@ -14,17 +14,16 @@ FoamFile
 }
 // ============================================================================
 
-// ISA @ 15000 m: T = 216.65 K
+#include        "0/include/freeStreamVars"
 dimensions      [0 0 0 1 0 0 0];
-
-internalField   uniform 216.65;
+internalField   uniform $TInf;
 
 boundaryField
 {
     inlet
     {
         type            fixedValue;
-        value           uniform 216.65;
+        value           uniform $TInf;
     }
 
     outlet
@@ -32,19 +31,14 @@ boundaryField
         type            zeroGradient;
     }
 
-    farfield_top
+    farfield
     {
         type            freestream;
-        freestreamValue uniform 216.65;
+        freestreamValue uniform $TInf;
     }
 
-    farfield_bottom { $farfield_top; }
-    farfield_sides  { $farfield_top; }
-
-    uav_wall
+    uav
     {
-        // Adiabatic wall (zero heat flux)
-        // Switch to fixedValue for isothermal: value uniform 300; // [K]
         type            zeroGradient;
     }
 }

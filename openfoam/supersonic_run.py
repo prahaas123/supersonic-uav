@@ -100,7 +100,6 @@ def isa_atmosphere(altitude_m):
     nu  = mu / rho
     return dict(T=round(T,4), p=round(p,2), rho=round(rho,6), a=round(a,4), mu=mu, nu=nu)
 
-
 def initialize_results_csv():
     if os.path.exists(RESULTS_CSV):
         os.remove(RESULTS_CSV)
@@ -109,18 +108,13 @@ def initialize_results_csv():
         csv.writer(f).writerow(["Alpha", "CL", "CD", "LD_ratio", "CM", "Avg_yPlus", "Max_yPlus"])
     print(f"[*] Initialized fresh {RESULTS_CSV}")
 
-
 def append_result(row):
     with open(RESULTS_CSV, mode='a', newline='') as f:
         csv.DictWriter(f, fieldnames=["Alpha", "CL", "CD", "LD_ratio", "CM",
                                       "Avg_yPlus", "Max_yPlus"]).writerow(row)
 
-
 def prepare(job_directory, alpha_deg, atm, u_inf):
     try:
-        cos_a = math.cos(math.radians(alpha_deg))
-        sin_a = math.sin(math.radians(alpha_deg))
-
         # Clone template
         if os.path.exists(job_directory):
             shutil.rmtree(job_directory)
@@ -142,55 +136,33 @@ def prepare(job_directory, alpha_deg, atm, u_inf):
         fc["rhoInf"]    = atm["rho"]
         fc["pRef"]      = atm["p"]
         fc["CofR"]      = f"({CG_X} 0 0)"
-        fc["liftDir"]   = f"({-sin_a:.6g} {cos_a:.6g} 0)"
-        fc["dragDir"]   = f"({cos_a:.6g} {sin_a:.6g} 0)"
         cd["functions"]["forces"]["CofR"]   = f"({CG_X} 0 0)"
         cd["functions"]["forces"]["rhoInf"] = atm["rho"]
         cd["functions"]["forces"]["pRef"]   = atm["p"]
         cd.writeFile()
-
-        # Patch 0/ field files
-        _patch_U(job_directory, u_inf, 0.0, 0.0)       # flow along +X; STL rotated by -alpha
-        _patch_scalar(job_directory, "p",   atm["p"])
-        _patch_scalar(job_directory, "T",   atm["T"])
-        _patch_scalar(job_directory, "rho", atm["rho"])
-
+        
+        # Freestream variables
         TI, L_mix, Cmu = 0.001, 0.02, 0.09
         k_inf     = 1.5 * (TI * u_inf) ** 2
         omega_inf = k_inf**0.5 / (Cmu**0.25 * L_mix)
-        _patch_scalar(job_directory, "k",     k_inf)
-        _patch_scalar(job_directory, "omega", omega_inf)
+        vars_path = os.path.join(job_directory, "0", "include", "freestreamVars")
+        with open(vars_path, "w") as f:
+            f.write(f"Uinf  ({u_inf:.6g} 0.0 0.0);\n")
+            f.write(f"pInf  {atm['p']:.6g};\n")
+            f.write(f"Tinf  {atm['T']:.6g};\n")
+            f.write(f"rhoInf {atm['rho']:.6g};\n")
+            f.write(f"kinf  {k_inf:.6g};\n")
+            f.write(f"omegaInf {omega_inf:.6g};\n")
 
         return True
     except Exception as e:
         print(f"Exception during preparation: {e}")
         return False
 
-
-def _patch_U(job_directory, Ux, Uy, Uz):
-    vec  = f"({Ux:.6g} {Uy:.6g} {Uz:.6g})"
-    path = f"{job_directory}/0/U"
-    with open(path) as f: c = f.read()
-    c = re.sub(r'(internalField\s+uniform\s*)\([^)]+\)',                  rf'\g<1>{vec}', c)
-    c = re.sub(r'(type\s+fixedValue;\s*value\s+uniform\s*)\([^)]+\)',     rf'\g<1>{vec}', c)
-    c = re.sub(r'(freestreamValue\s+uniform\s*)\([^)]+\)',                rf'\g<1>{vec}', c)
-    with open(path, "w") as f: f.write(c)
-
-
-def _patch_scalar(job_directory, field, value):
-    path = f"{job_directory}/0/{field}"
-    with open(path) as f: c = f.read()
-    c = re.sub(r'(internalField\s+uniform\s+)[0-9eE+\-\.]+',              rf'\g<1>{value:.6g}', c)
-    c = re.sub(r'(type\s+fixedValue;\s*value\s+uniform\s+)[0-9eE+\-\.]+', rf'\g<1>{value:.6g}', c)
-    c = re.sub(r'(freestreamValue\s+uniform\s+)[0-9eE+\-\.]+',            rf'\g<1>{value:.6g}', c)
-    with open(path, "w") as f: f.write(c)
-
-
 def mesh(job_directory, alpha):
     os.makedirs(f"{job_directory}/constant/triSurface", exist_ok=True)
 
     COMMANDS = [
-        f"surfaceTransformPoints -rotate-angle '((0 1 0) {-alpha})' "
         f"{GEOMETRY_STL} {job_directory}/constant/triSurface/uav.stl",
         f"surfaceFeatureExtract -case {job_directory}",
         f"blockMesh -case {job_directory}",
@@ -208,7 +180,6 @@ def mesh(job_directory, alpha):
             return False
 
     return os.path.isdir(f"{job_directory}/constant/polyMesh")
-
 
 def solve(job_directory):
     COMMANDS = [
@@ -230,11 +201,9 @@ def solve(job_directory):
                  if os.path.isdir(f"{job_directory}/{d}") and _is_float(d) and float(d) > 0]
     return len(time_dirs) > 0
 
-
 def _is_float(s):
     try: float(s); return True
     except ValueError: return False
-
 
 def extract_results(job_directory, alpha, atm, u_inf):
     result = {"Alpha": alpha, "CL": None, "CD": None, "LD_ratio": None,
@@ -280,7 +249,6 @@ def extract_results(job_directory, alpha, atm, u_inf):
 
     return result
 
-
 def cleanup(job_directory):
     COMMANDS = [
         f"rm -rf {job_directory}/constant/polyMesh",
@@ -291,7 +259,6 @@ def cleanup(job_directory):
     ]
     for command in COMMANDS:
         subprocess.run(command, shell=True, capture_output=True, text=True)
-
 
 if __name__ == "__main__":
     main()
