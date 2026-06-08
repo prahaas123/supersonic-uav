@@ -18,93 +18,78 @@ castellatedMesh true;
 snap            true;
 addLayers       true;
 
+mergeTolerance 1e-6;
+
 geometry
 {
     uav.stl
     {
-        type    triSurfaceMesh;
-        name    uav_wall;
+        type triSurfaceMesh;
+        name uav;
     }
 
-    box_near_body
+    shockAndWakeBox
     {
-        type    searchableBox;
-        min     (-0.5 -1.8 -1.8);
-        max     ( 4.5  1.8  1.8);
-    }
-
-    box_shock_region
-    {
-        type    searchableBox;
-        min     (-1.5 -4.0 -4.0);
-        max     (10.0  4.0  4.0);
-    }
-
-    box_wake
-    {
-        type    searchableBox;
-        min     ( 2.0 -2.5 -2.5);
-        max     (15.0  2.5  2.5);
+        type searchableBox;
+        min (-1.5 -1.5 -2);
+        max ( 4.0  1.5  2);
     }
 }
 
 castellatedMeshControls
 {
-    maxLocalCells       2000000;
-    maxGlobalCells      20000000;
-    minRefinementCells  10;
-    maxLoadUnbalance    0.10;
-    nCellsBetweenLevels 3;
-    resolveFeatureAngle 30;
+    maxLocalCells 1000000;
+    maxGlobalCells 5000000;
+    minRefinementCells 10;
+    maxLoadUnbalance 0.10;
+    nCellsBetweenLevels 7;
 
     features
     (
         {
-            file    "uav.eMesh";
-            level   8;
+            file "uav.eMesh";
+            level 6;
         }
     );
 
     refinementSurfaces
+{
+    uav
     {
-        uav
+        level (6 7);
+        regions
         {
-            level       (8 9);
-            patchInfo   { type wall; }
+            uav
+            {
+                level (6 7);
+                name uav_wall;
+            }
         }
     }
+}
+
+    resolveFeatureAngle 30;
 
     refinementRegions
     {
-        box_near_body
+        shockAndWakeBox
         {
-            mode    inside;
-            levels  ((1e15 5));
-        }
-        box_shock_region
-        {
-            mode    inside;
-            levels  ((1e15 3));
-        }
-        box_wake
-        {
-            mode    inside;
-            levels  ((1e15 2));
+            mode inside;
+            levels ((1.0 3));
         }
     }
 
-    locationInMesh (7.3 3.7 3.3);
-
-    allowFreeStandingZoneFaces  true;
+    locationInMesh (-2.114 1.275 0.833); 
+    allowFreeStandingZoneFaces true;
 }
 
 snapControls
 {
-    nSmoothPatch        5;
-    tolerance           4.0;
-    nSolveIter          300;
-    nRelaxIter          5;
-    nFeatureSnapIter    15;
+    nSmoothPatch 3;
+    tolerance 2.0;
+    nSolveIter 15;
+    nRelaxIter 5;
+    nFeatureSnapIter 5;
     implicitFeatureSnap false;
     explicitFeatureSnap true;
     multiRegionFeatureSnap false;
@@ -112,32 +97,30 @@ snapControls
 
 addLayersControls
 {
-    relativeSizes   true;
-
+    relativeSizes true;
     layers
     {
         uav
         {
-            nSurfaceLayers  10;
+            nSurfaceLayers 7;
         }
     }
 
-    expansionRatio          1.15;
-    finalLayerThickness     0.5;
-    minThickness            0.15;
-    nGrow                   0;
-    featureAngle            60;
-    slipFeatureAngle        20;
-    nRelaxIter              5;
-    nSmoothSurfaceNormals   3;
-    nSmoothNormals          5;
-    nSmoothThickness        10;
-    maxFaceThicknessRatio   0.5;
-    maxThicknessToMedialRatio 0.6;
-    minMedialAxisAngle      85;
-    nBufferCellsNoExtrude   1;
-    nLayerIter              50;
-    nRelaxedIter            30;
+    expansionRatio 1.3;
+    finalLayerThickness 0.5;
+    minThickness 0.01;
+    nGrow 0;
+    featureAngle 130;
+    slipFeatureAngle 30;
+    nRelaxIter 5;
+    nSmoothSurfaceNormals 1;
+    nSmoothNormals 3;
+    nSmoothThickness 10;
+    maxFaceThicknessRatio 0.5;
+    maxThicknessToMedialRatio 0.3;
+    minMedialAxisAngle 90;
+    nBufferCellsNoExtrude 0;
+    nLayerIter 50;
 }
 
 meshQualityControls
@@ -160,4 +143,4 @@ meshQualityControls
     minTriangleTwist -1;
 }
 
-mergeTolerance  1e-6;
+debug 0;
