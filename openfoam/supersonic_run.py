@@ -171,6 +171,8 @@ def mesh(job_directory, alpha):
         f"rm -rf {job_directory}/processor*",
     ]
     
+    triSurface_dir = f"{job_directory}/constant/triSurface"
+    os.makedirs(triSurface_dir, exist_ok=True)
     shutil.copy(GEOMETRY_STL, f"{job_directory}/constant/triSurface/uav.stl")
     for command in COMMANDS:
         print(f"  -> Executing: {command}")
