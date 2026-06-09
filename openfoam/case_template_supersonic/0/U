@@ -14,7 +14,7 @@ FoamFile
 }
 // ============================================================================
 
-#include        "0/include/freeStreamVars"
+#include        "include/freeStreamVars"
 dimensions      [0 1 -1 0 0 0 0];
 internalField   uniform $UInf;
 
