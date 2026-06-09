@@ -16,26 +16,26 @@ FoamFile
 
 #include        "include/freeStreamVars"
 dimensions      [0 1 -1 0 0 0 0];
-internalField   uniform $UInf;
+internalField   uniform $Uinf;
 
 boundaryField
 {
     inlet
     {
         type            freestreamVelocity;
-        freestreamValue uniform $UInf;
+        freestreamValue uniform $Uinf;
     }
 
     outlet
     {
         type            freestreamVelocity;
-        freestreamValue uniform $UInf;
+        freestreamValue uniform $Uinf;
     }
 
     farfield
     {
         type            freestreamVelocity;
-        freestreamValue uniform $UInf;
+        freestreamValue uniform $Uinf;
     }
 
     uav

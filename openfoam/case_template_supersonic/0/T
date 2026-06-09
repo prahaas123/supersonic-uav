@@ -23,7 +23,7 @@ boundaryField
     inlet
     {
         type            fixedValue;
-        value           uniform $TInf;
+        value           uniform $Tinf;
     }
 
     outlet
@@ -34,7 +34,7 @@ boundaryField
     farfield
     {
         type            freestream;
-        freestreamValue uniform $TInf;
+        freestreamValue uniform $Tinf;
     }
 
     uav
