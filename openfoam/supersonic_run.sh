@@ -2,7 +2,7 @@
 
 #SBATCH --job-name=Wing
 #SBATCH --account=def-jphickey
-#SBATCH --time=6-00:00:00
+#SBATCH --time=1-00:00:00
 #SBATCH --nodes=1
 #SBATCH --ntasks-per-node=64
 #SBATCH --cpus-per-task=1

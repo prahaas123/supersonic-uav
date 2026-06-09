@@ -74,8 +74,8 @@ def main():
         print(f"  CL={results['CL']}  CD={results['CD']}  CM={results['CM']}  L/D={results['LD_ratio']}")
 
         # 5. Clean Up
-        print("[5/5] Cleaning up heavy mesh/processor files...")
-        cleanup(job_directory)
+        # print("[5/5] Cleaning up heavy mesh/processor files...")
+        # cleanup(job_directory)
 
         print(f"Successfully completed {job_id}!")
 
