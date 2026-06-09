@@ -163,7 +163,6 @@ def mesh(job_directory, alpha):
     os.makedirs(f"{job_directory}/constant/triSurface", exist_ok=True)
 
     COMMANDS = [
-        f"{GEOMETRY_STL} {job_directory}/constant/triSurface/uav.stl",
         f"surfaceFeatureExtract -case {job_directory}",
         f"blockMesh -case {job_directory}",
         f"decomposePar -case {job_directory}",
@@ -171,7 +170,8 @@ def mesh(job_directory, alpha):
         f"reconstructParMesh -constant -case {job_directory}",
         f"rm -rf {job_directory}/processor*",
     ]
-
+    
+    shutil.copy(GEOMETRY_STL, f"{job_directory}/constant/triSurface/uav.stl")
     for command in COMMANDS:
         print(f"  -> Executing: {command}")
         result = subprocess.run(command, shell=True, executable='/bin/bash')
