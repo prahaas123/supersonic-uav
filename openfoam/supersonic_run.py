@@ -145,7 +145,7 @@ def prepare(job_directory, alpha_deg, atm, u_inf):
         TI, L_mix, Cmu = 0.001, 0.02, 0.09
         k_inf     = 1.5 * (TI * u_inf) ** 2
         omega_inf = k_inf**0.5 / (Cmu**0.25 * L_mix)
-        vars_path = os.path.join(job_directory, "0", "include", "freestreamVars")
+        vars_path = os.path.join(job_directory, "0", "include", "freeStreamVars")
         with open(vars_path, "w") as f:
             f.write(f"Uinf  ({u_inf:.6g} 0.0 0.0);\n")
             f.write(f"pInf  {atm['p']:.6g};\n")
