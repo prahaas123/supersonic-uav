@@ -24,4 +24,4 @@ pip install --find-links=$SCRATCH/pyfoam_wheel --no-index PyFoam matplotlib
 
 export SQUEUE_FORMAT='%i","%j","%t","%M","%L","%D","%C","%m","%b","%R'
 
-python3 grid_independence.py
+python3 grid_independance.py
