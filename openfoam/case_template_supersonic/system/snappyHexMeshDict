@@ -32,7 +32,7 @@ geometry
     {
         type searchableBox;
         min (-1.5 -1.5 -2);
-        max ( 4.0  1.5  2);
+        max ( 5.0  1.5  2);
     }
 }
 

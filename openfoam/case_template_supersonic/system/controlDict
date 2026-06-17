@@ -102,6 +102,16 @@ functions
         writeControl    writeTime;
     }
 
+    wallShearStress
+    {
+        type            wallShearStress;
+        libs            (fieldFunctionObjects);
+        patches         (uav); 
+        writeToFile     true;
+        writeControl    timeStep;
+        writeInterval   10;
+    }
+
     residuals
     {
         type            solverInfo;

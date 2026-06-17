@@ -197,10 +197,6 @@ def yplus():
     ResetSession()
     
 def print_and_plot_stats():
-    print("\n" + "="*50)
-    print("📊 EXTRACTING FINAL STATS & PLOTTING CONVERGENCE")
-    print("="*50)
-
     # Y+
     avg_yp, max_yp = 0.0, 0.0
     try:
@@ -325,6 +321,74 @@ def print_and_plot_stats():
             ])
     except Exception as e:
         print(f"Warning: Could not write to CSV. Error: {e}")
+        
+def plot_residuals():
+    try:
+        import matplotlib.pyplot as plt
+        def _start_time(path):
+            try:
+                return float(os.path.basename(os.path.dirname(path)))
+            except ValueError:
+                return 0.0
+ 
+        solver_files = sorted(
+            glob.glob(f"{base_case_dir}/postProcessing/solverInfo/*/solverInfo.dat"),
+            key=_start_time
+        )
+        if not solver_files:
+            print("Warning: No solverInfo.dat files found.")
+            return
+ 
+        residuals = {}  # field_name -> ([times], [initial_residuals])
+        for solver_file in solver_files:
+            with open(solver_file, 'r') as f:
+                lines = f.readlines()
+ 
+            header_line = next((l for l in lines if l.startswith('# Time')), None)
+            if header_line is None:
+                continue
+            columns = header_line.lstrip('#').split()
+            # Map field name -> column index of its "_initial" residual
+            field_cols = {
+                name[:-len('_initial')]: idx
+                for idx, name in enumerate(columns)
+                if name.endswith('_initial')
+            }
+ 
+            for line in lines:
+                if line.startswith('#'):
+                    continue
+                parts = line.split()
+                if len(parts) != len(columns):
+                    continue
+                time = float(parts[0])
+                for field, idx in field_cols.items():
+                    t_list, v_list = residuals.setdefault(field, ([], []))
+                    # Skip overlapping time entries from restarts
+                    if t_list and time <= t_list[-1]:
+                        continue
+                    t_list.append(time)
+                    v_list.append(float(parts[idx]))
+ 
+        if not residuals:
+            print("Warning: No residual fields found in solverInfo.dat.")
+            return
+ 
+        plt.figure(figsize=(9, 6))
+        for field, (times, values) in sorted(residuals.items()):
+            plt.semilogy(times, values, label=field, linewidth=1.0)
+ 
+        plt.xlabel("Time (s)")
+        plt.ylabel("Initial Residual")
+        plt.title("Residual Convergence")
+        plt.grid(True, which="both", linestyle="--", alpha=0.5)
+        plt.legend()
+        plt.savefig(f"{job_directory}/residuals.png", dpi=300, bbox_inches="tight")
+        plt.close()
+        print(f"Saved residuals plot to {job_directory}/residuals.png")
+ 
+    except Exception as e:
+        print(f"Warning: Could not process/plot residuals. Error: {e}")
     
 if __name__ == "__main__":
     input_filepath = sys.argv[1]
@@ -337,6 +401,7 @@ if __name__ == "__main__":
     cp_countour()
     pressure_slice()
     velocity_slice()
-    # wall_shear()
+    wall_shear()
     yplus()
     print_and_plot_stats()
+    plot_residuals()
