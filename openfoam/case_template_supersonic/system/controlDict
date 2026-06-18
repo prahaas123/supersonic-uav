@@ -50,9 +50,9 @@ functions
         pRef            12112;      // [Pa]
 
         // Aerodynamic axes
-        liftDir         (0 1 0);    // +Y = lift direction
-        dragDir         (1 0 0);    // +X = drag direction
-        pitchAxis       (0 0 1);    // +Z = pitch moment axis
+        liftDir         (0 1 0); 
+        dragDir         (1 0 0);
+        pitchAxis       (0 0 1);
 
         // Reference geometry
         CofR            (0.5 0.0 0.0);  // Centre of rotation / gravity [m]
@@ -119,5 +119,35 @@ functions
         fields          (k omega);
         writeControl    timeStep;
         writeInterval   1;
+    }
+
+    convergenceControl
+    {
+        type            runTimeControl;
+        libs            (utilityFunctionObjects);
+        conditionMode   all;
+
+        conditions
+        {
+            residualsConverged
+            {
+                type            equationInitialResidual;
+                fields          (k omega p U e);
+                value           1e-7;
+                mode            maximum;
+            }
+
+            clCdStable
+            {
+                type            average;
+                functionObject  forceCoeffs;
+                fields          (Cl Cd);
+                tolerance       1e-4;
+                window          200;
+                windowType      exact;
+            }
+        }
+
+        satisfiedAction writeAndEnd;
     }
 }
