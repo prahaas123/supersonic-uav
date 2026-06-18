@@ -216,8 +216,6 @@ def post_process(job_id):
 
 def cleanup(job_directory):
     COMMANDS = [
-        f"rm -rf {job_directory}/constant/polyMesh",
-        f"rm -rf {job_directory}/constant/extendedFeatureEdgeMesh",
         f"rm -rf {job_directory}/processor*",
         f"rm -rf {job_directory}/PyFoam*",
         "rm -rf PyFoam*",
