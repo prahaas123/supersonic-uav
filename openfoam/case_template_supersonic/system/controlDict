@@ -127,6 +127,7 @@ functions
         libs            (utilityFunctionObjects);
         conditionMode   all;
 
+        conditions
         {
             timeElapsed
             {
