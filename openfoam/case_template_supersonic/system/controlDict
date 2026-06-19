@@ -18,7 +18,7 @@ application     rhoCentralFoam;
 startFrom       latestTime;
 startTime       0;
 stopAt          endTime;
-endTime         1e-2;
+endTime         2e-2;
 deltaT          1e-8;
 writeControl    adjustable;
 writeInterval   1e-3;
@@ -50,12 +50,12 @@ functions
         pRef            12112;      // [Pa]
 
         // Aerodynamic axes
-        liftDir         (0 1 0); 
+        liftDir         (0 0 1); 
         dragDir         (1 0 0);
-        pitchAxis       (0 0 1);
+        pitchAxis       (0 1 0);
 
         // Reference geometry
-        CofR            (0.5 0.0 0.0);  // Centre of rotation / gravity [m]
+        CofR            (1.0 0.0 0.0);  // Centre of rotation / gravity [m]
         magUInf         442.6;          // Freestream speed [m/s]
         lRef            0.30;           // Reference chord length [m]
         Aref            0.60;           // Reference planform area [m2]
@@ -129,25 +129,16 @@ functions
 
         conditions
         {
-            residualsConverged
-            {
-                type            equationInitialResidual;
-                fields          (k omega p U e);
-                value           1e-7;
-                mode            maximum;
-            }
-
             clCdStable
             {
                 type            average;
                 functionObject  forceCoeffs;
                 fields          (Cl Cd);
                 tolerance       1e-4;
-                window          200;
+                window          1000;
                 windowType      exact;
             }
         }
-
         satisfiedAction end;
     }
 }

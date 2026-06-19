@@ -240,7 +240,7 @@ def print_and_plot_stats():
             plt.ylabel("Lift Coefficient (Cl)")
             plt.title("Lift Coefficient Convergence")
             plt.grid(True, linestyle="--", alpha=0.7)
-            plt.ylim(-0.1, 0.5)
+            plt.ylim(-0.0005, 0.001)
             plt.savefig(f"{job_directory}/convergence_Cl.png", dpi=300, bbox_inches="tight")
             plt.close()
 
@@ -251,7 +251,7 @@ def print_and_plot_stats():
             plt.ylabel("Drag Coefficient (Cd)")
             plt.title("Drag Coefficient Convergence")
             plt.grid(True, linestyle="--", alpha=0.7)
-            plt.ylim(0, 0.5)
+            plt.ylim(0.1, 0.15)
             plt.savefig(f"{job_directory}/convergence_Cd.png", dpi=300, bbox_inches="tight")
             plt.close()
     except Exception as e:
