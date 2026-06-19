@@ -133,10 +133,11 @@ functions
             {
                 type            average;
                 functionObject  forceCoeffs;
-                fields          (Cl Cd);
-                tolerance       1e-4;
-                window          1000;
+                fields          (Cd);
+                tolerance       5e-5;
+                window          10000;
                 windowType      exact;
+                minIter         15000;
             }
         }
         satisfiedAction end;
