@@ -127,9 +127,14 @@ functions
         libs            (utilityFunctionObjects);
         conditionMode   all;
 
-        conditions
         {
-            clCdStable
+            timeElapsed
+            {
+                type        maxDuration;
+                duration    5e-3;
+            }
+
+            cdStable
             {
                 type            average;
                 functionObject  forceCoeffs;
@@ -137,7 +142,6 @@ functions
                 tolerance       5e-5;
                 window          10000;
                 windowType      exact;
-                minIter         15000;
             }
         }
         satisfiedAction end;
