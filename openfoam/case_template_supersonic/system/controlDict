@@ -40,7 +40,7 @@ functions
         type            forceCoeffs;
         libs            (forces);
         writeControl    timeStep;
-        writeInterval   10;
+        writeInterval   1;
         log             true;
         patches         (uav);
 
@@ -66,7 +66,7 @@ functions
         type            forces;
         libs            (forces);
         writeControl    timeStep;
-        writeInterval   10;
+        writeInterval   1;
         log             true;
 
         patches         (uav);
@@ -109,7 +109,7 @@ functions
         patches         (uav); 
         writeToFile     true;
         writeControl    timeStep;
-        writeInterval   10;
+        writeInterval   1;
     }
 
     residuals
@@ -140,7 +140,7 @@ functions
                 type            average;
                 functionObject  forceCoeffs;
                 fields          (Cd);
-                tolerance       5e-5;
+                tolerance       1.5e-4;
                 window          10000;
                 windowType      exact;
             }
