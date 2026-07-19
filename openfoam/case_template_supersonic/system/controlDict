@@ -108,7 +108,7 @@ functions
         libs            (fieldFunctionObjects);
         patches         (uav); 
         writeToFile     true;
-        writeControl    timeStep;
+        writeControl    writeTime;
         writeInterval   1;
     }
 
@@ -120,31 +120,4 @@ functions
         writeControl    timeStep;
         writeInterval   1;
     }
-
-    // convergenceControl
-    // {
-    //     type            runTimeControl;
-    //     libs            (utilityFunctionObjects);
-    //     conditionMode   all;
-
-    //     conditions
-    //     {
-    //         timeElapsed
-    //         {
-    //             type        maxDuration;
-    //             duration    5e-3;
-    //         }
-
-    //         cdStable
-    //         {
-    //             type            average;
-    //             functionObject  forceCoeffs;
-    //             fields          (Cd);
-    //             tolerance       1.5e-4;
-    //             window          10000;
-    //             windowType      exact;
-    //         }
-    //     }
-    //     satisfiedAction end;
-    // }
 }
