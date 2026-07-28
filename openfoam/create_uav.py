@@ -105,11 +105,15 @@ void main() {{
     with open(script_filename, "w") as f:
         f.write(vspscript_content)
 
-    try:
-        subprocess.run(["vspscript", "-script", script_filename], check=True)
-        print(f"Created UAV Model: '{output_name}.vsp3' and '{output_name}.stl'")
-    except FileNotFoundError:
-        print("Error: Could not find the 'vspscript' command.")
+    try:        
+        vsp_command = (
+            "module swap gcc/12.3 gcc/13.3 && "
+            f"module use \"$HOME/modulefiles\" && "
+            "module load openvsp/3.51.0-headless && "
+            f"vspscript -script {script_filename}"
+        )
+        subprocess.run(vsp_command, shell=True, executable='/bin/bash', check=True)
+        print(f"Model created. Exported {output_name}.stl") 
     except subprocess.CalledProcessError as e:
         print(f"Error: OpenVSP script execution failed with code {e.returncode}")
 
