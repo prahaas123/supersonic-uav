@@ -107,9 +107,9 @@ void main() {{
 
     try:        
         vsp_command = (
-            "module swap gcc/12.3 gcc/13.3 && "
-            f"module use \"$HOME/modulefiles\" && "
-            "module load openvsp/3.51.0-headless && "
+            "module swap gcc/12.3 gcc/13.3 ; "
+            f"module use \"$HOME/modulefiles\" ; "
+            "module load openvsp/3.51.0-headless ; "
             f"vspscript -script {script_filename}"
         )
         subprocess.run(vsp_command, shell=True, executable='/bin/bash', check=True)
