@@ -95,7 +95,7 @@ void main() {{
     string base_filename = "{output_name}";
     
     // Save OpenVSP Model
-    WriteVSPFile(base_filename + ".vsp3");
+    WriteVSPFile(base_filename + ".vsp3", SET_ALL);
     
     // Export STL with default settings
     ExportFile(base_filename + ".stl", SET_ALL, EXPORT_STL); 
