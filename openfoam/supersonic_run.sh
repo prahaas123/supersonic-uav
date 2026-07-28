@@ -1,17 +1,17 @@
 #!/bin/bash
 
-#SBATCH --job-name=Wing
+#SBATCH --job-name=optimization
 #SBATCH --account=def-jphickey
 #SBATCH --time=1-00:00:00
 #SBATCH --nodes=1
 #SBATCH --ntasks-per-node=40
 #SBATCH --cpus-per-task=1
 #SBATCH --mem=150G
-#SBATCH --output=Log.log
+#SBATCH --output=Optimization.log
 #SBATCH --open-mode=append
 
 module load StdEnv/2023
-module load gcc/12.3
+module load gcc/13.3
 module load openmpi/4.1.5
 module load paraview/5.11.2
 module load python/3.11.5
