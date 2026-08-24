@@ -4,7 +4,7 @@
 #SBATCH --account=def-jphickey
 #SBATCH --time=1-00:00:00
 #SBATCH --nodes=1
-#SBATCH --ntasks-per-node=40
+#SBATCH --ntasks-per-node=30
 #SBATCH --cpus-per-task=1
 #SBATCH --mem=150G
 #SBATCH --output=Optimization.log

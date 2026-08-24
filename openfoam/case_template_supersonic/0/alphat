@@ -37,6 +37,11 @@ boundaryField
         value           uniform 0;
     }
 
+    symmetry
+    {
+        type            symmetry;
+    }
+
     uav
     {
         type            compressible::alphatWallFunction;

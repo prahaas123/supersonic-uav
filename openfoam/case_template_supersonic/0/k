@@ -37,6 +37,11 @@ boundaryField
         freestreamValue uniform $kinf;
     }
 
+    symmetry
+    {
+        type            symmetry;
+    }
+
     uav
     {
         type            kqRWallFunction;

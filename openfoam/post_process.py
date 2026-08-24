@@ -228,11 +228,11 @@ def print_and_plot_stats():
                     parts = line.split()
                     if len(parts) >= 8:
                         times.append(float(parts[0]))
-                        cds.append(float(parts[1]))
-                        cls.append(float(parts[4]))
-                        cd_val = float(parts[1])
-                        cl_val = float(parts[4])
-                        cm_val = float(parts[7])
+                        cds.append(float(2.0 * parts[1]))
+                        cls.append(float(2.0 * parts[4]))
+                        cd_val = 2.0 * float(parts[1])
+                        cl_val = 2.0 * float(parts[4])
+                        cm_val = 2.0 *float(parts[7])
             
             # Generate CL Plot
             plt.figure(figsize=(8, 5))
@@ -272,8 +272,8 @@ def print_and_plot_stats():
                     parts = clean_line.split()
                     
                     if len(parts) >= 4:
-                        drag_force = float(parts[1]) # Flow is along X
-                        lift_force = float(parts[3]) # Lift is along Z
+                        drag_force = float(2.0 * parts[1]) # Flow is along X
+                        lift_force = float(2.0 * parts[3]) # Lift is along Z
     except Exception as e:
         print(f"Warning: Could not process raw forces. Error: {e}")
 

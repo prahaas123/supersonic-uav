@@ -37,6 +37,11 @@ boundaryField
         freestreamValue uniform $rhoInf;
     }
 
+    symmetry
+    {
+        type            symmetry;
+    }
+
     uav
     {
         type            zeroGradient;

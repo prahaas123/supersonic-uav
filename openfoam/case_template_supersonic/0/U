@@ -38,6 +38,11 @@ boundaryField
         freestreamValue uniform $Uinf;
     }
 
+    symmetry
+    {
+        type            symmetry;
+    }
+
     uav
     {
         type            noSlip;
