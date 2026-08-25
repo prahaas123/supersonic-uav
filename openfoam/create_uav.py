@@ -2,7 +2,7 @@ import subprocess
 import os
 
 def create_uav_model(
-    y_rotation=1.0, 
+    y_rotation=5.0, 
     seg1_root_chord=4.0, 
     seg1_span=0.75, 
     seg1_tip_chord=1.6, 
