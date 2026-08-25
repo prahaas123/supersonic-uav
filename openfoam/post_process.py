@@ -24,7 +24,7 @@ VIEW_2D_SLICE = {
     "position": [2.5, -12.0, 0.0],
     "focal_point": [2.5, 0.0, 0.0],
     "view_up": [0, 0, 1],
-    "slice-origin": [0.0, 0.0, 0.0],
+    "slice-origin": [0.0, 0.01, 0.0],
     "slice-normal": [0, 1, 0]
 }
 
@@ -198,131 +198,62 @@ def yplus():
     ResetSession()
     
 def print_and_plot_stats():
-    # Y+
-    avg_yp, max_yp = 0.0, 0.0
-    try:
-        y_files = glob.glob(f"{base_case_dir}/postProcessing/yPlus/*/yPlus.dat")
-        if y_files:
-            latest_y_file = sorted(y_files)[-1]
-            with open(latest_y_file, 'r') as f:
-                for line in f:
-                    if line.startswith('#'): continue
-                    parts = line.split()
-                    if len(parts) >= 4 and parts[1] == "uav":
-                        avg_yp = float(parts[4])
-                        max_yp = float(parts[3])
-    except Exception as e:
-        print(f"Warning: Could not extract yPlus data from mesh. Error: {e}")
+    import csv
+    import json
 
-    # Force coefficients
-    cl_val, cd_val, cm_val = 0.0, 0.0, 0.0
+    sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+    from metrics import (extract_metrics, format_summary, window_stats,
+                         _read_dat, SYMMETRY_FACTOR, TAIL_FRACTION)
+
+    m = extract_metrics(base_case_dir)
+    print(format_summary(m))
+
+    with open(os.path.join(base_case_dir, "metrics.json"), "w") as fh:
+        json.dump(m, fh, indent=2)
+
+    # Convergence plots
     try:
         import matplotlib.pyplot as plt
-        times, cls, cds = [], [], []
-        coeff_files = glob.glob(f"{base_case_dir}/postProcessing/forceCoeffs/*/coefficient.dat")
-        if coeff_files:
-            latest_coeff_file = sorted(coeff_files)[-1]
-            with open(latest_coeff_file, 'r') as f:
-                for line in f:
-                    if line.startswith('#'): continue
-                    parts = line.split()
-                    if len(parts) >= 8:
-                        times.append(float(parts[0]))
-                        cds.append(float(2.0 * parts[1]))
-                        cls.append(float(2.0 * parts[4]))
-                        cd_val = 2.0 * float(parts[1])
-                        cl_val = 2.0 * float(parts[4])
-                        cm_val = 2.0 *float(parts[7])
-            
-            # Generate CL Plot
+
+        panels = []
+        tc, C = _read_dat(base_case_dir, "forceCoeffs", "coefficient.dat", 8)
+        if tc is not None:
+            panels += [("Cl", tc, C[:, 3] * SYMMETRY_FACTOR, m.get("Cl"),
+                        "Lift Coefficient (Cl)", "#1f77b4", "convergence_Cl.png"),
+                       ("Cd", tc, C[:, 0] * SYMMETRY_FACTOR, m.get("Cd"),
+                        "Drag Coefficient (Cd)", "#d62728", "convergence_Cd.png")]
+
+        tf, F = _read_dat(base_case_dir, "forces", "force.dat", 4)
+        if tf is not None:
+            panels += [("Fz", tf, F[:, 2] * SYMMETRY_FACTOR, m.get("lift_N"),
+                        "Lift Force (N)", "#1f77b4", "convergence_lift.png"),
+                       ("Fx", tf, F[:, 0] * SYMMETRY_FACTOR, m.get("drag_N"),
+                        "Drag Force (N)", "#d62728", "convergence_drag.png")]
+
+        for _, t, y, mean, ylabel, colour, fname in panels:
+            t_cut = t[0] + (1.0 - TAIL_FRACTION) * (t[-1] - t[0])
             plt.figure(figsize=(8, 5))
-            plt.plot(times, cls, label="Cl", color="#1f77b4", linewidth=2)
+            plt.plot(t, y, color=colour, linewidth=1.2)
+            plt.axvspan(t_cut, t[-1], color="0.6", alpha=0.25,
+                        label=f"averaging window (last {100*TAIL_FRACTION:.0f}%)")
+            if mean is not None:
+                plt.axhline(mean, color="k", linestyle="--", linewidth=1.2,
+                            label=f"mean = {mean:.5g}")
             plt.xlabel("Time (s)")
-            plt.ylabel("Lift Coefficient (Cl)")
-            plt.title("Lift Coefficient Convergence")
+            plt.ylabel(ylabel)
+            plt.title(f"{ylabel} Convergence")
             plt.grid(True, linestyle="--", alpha=0.7)
-            plt.ylim(np.percentile(cls, 5), np.percentile(cls, 99))
-            plt.savefig(f"{job_directory}/convergence_Cl.png", dpi=300, bbox_inches="tight")
-            plt.close()
-
-            # Generate CD Plot
-            plt.figure(figsize=(8, 5))
-            plt.plot(times, cds, label="Cd", color="#d62728", linewidth=2)
-            plt.xlabel("Time (s)")
-            plt.ylabel("Drag Coefficient (Cd)")
-            plt.title("Drag Coefficient Convergence")
-            plt.grid(True, linestyle="--", alpha=0.7)
-            plt.ylim(np.percentile(cds, 5), np.percentile(cds, 99))
-            plt.savefig(f"{job_directory}/convergence_Cd.png", dpi=300, bbox_inches="tight")
+            # Clip the y-range to the settled part; the startup spike is 4x the converged value and would flatten everything else.
+            tail = y[t >= t_cut]
+            if len(tail) > 1:
+                pad = max(6.0 * (tail.max() - tail.min()), 0.02 * abs(tail.mean()))
+                plt.ylim(tail.min() - pad, tail.max() + pad)
+            plt.legend(fontsize=8)
+            plt.savefig(f"{job_directory}/{fname}", dpi=200, bbox_inches="tight")
             plt.close()
     except Exception as e:
-        print(f"Warning: Could not process/plot coefficients. Ensure matplotlib is installed. Error: {e}")
+        print(f"Warning: Could not plot convergence histories. Error: {e}")
 
-    # Raw forces
-    lift_force, drag_force = 0.0, 0.0
-    try:
-        force_files = glob.glob(f"{base_case_dir}/postProcessing/forces/*/force.dat")
-        if force_files:
-            latest_force_file = sorted(force_files)[-1]
-            with open(latest_force_file, 'r') as f:
-                lines = [l for l in f.readlines() if not l.startswith('#')]
-                if lines:
-                    last_line = lines[-1]
-                    clean_line = last_line.replace('(', ' ').replace(')', ' ')
-                    parts = clean_line.split()
-                    
-                    if len(parts) >= 4:
-                        drag_force = float(2.0 * parts[1]) # Flow is along X
-                        lift_force = float(2.0 * parts[3]) # Lift is along Z
-    except Exception as e:
-        print(f"Warning: Could not process raw forces. Error: {e}")
-
-    # Print Outputs
-    print("\n" + "═"*40)
-    print(" 🏁 SIMULATION RESULTS SUMMARY")
-    print("═"*40)
-    print(f"  Lift Coefficient (CL) :  {cl_val:.5f}")
-    print(f"  Drag Coefficient (CD) :  {cd_val:.5f}")
-    print(f"  Lift-to-Drag Ratio    :  {cl_val/cd_val if cd_val != 0 else 'N/A'}")
-    print(f"  Pitch Moment (CM)     :  {cm_val:.5f}")
-    print("-" * 40)
-    print(f"  Total Lift Force (Z)  :  {lift_force:.2f} N")
-    print(f"  Total Drag Force (X)  :  {drag_force:.2f} N")
-    print("-" * 40)
-    print(f"  Average y+            :  {avg_yp:.3f}")
-    print(f"  Maximum y+            :  {max_yp:.3f}")
-    print("═"*40 + "\n")
-    
-    # Append to CSV
-    try:
-        import csv
-        ld_ratio = cl_val / cd_val if cd_val != 0 else 0.0
-        case_name = os.path.basename(base_case_dir)
-        alpha = case_name.replace("run_alpha_", "")
-        project_dir = os.path.dirname(base_case_dir) or "."
-        csv_file_path = os.path.join(project_dir, "results.csv")
-        file_exists = os.path.isfile(csv_file_path)
-        
-        with open(csv_file_path, mode='a', newline='') as csv_file:
-            writer = csv.writer(csv_file)
-            if not file_exists:
-                writer.writerow(["Alpha", "CL", "CD", "L/D", "CM", "Lift_N", "Drag_N", "Avg_yPlus", "Max_yPlus"])
-            
-            # Write the data row
-            writer.writerow([
-                alpha,
-                f"{cl_val:.5f}",
-                f"{cd_val:.5f}",
-                f"{ld_ratio:.5f}",
-                f"{cm_val:.5f}",
-                f"{lift_force:.2f}",
-                f"{drag_force:.2f}",
-                f"{avg_yp:.3f}",
-                f"{max_yp:.3f}"
-            ])
-    except Exception as e:
-        print(f"Warning: Could not write to CSV. Error: {e}")
-        
 def plot_residuals():
     try:
         import matplotlib.pyplot as plt

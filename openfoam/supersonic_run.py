@@ -1,4 +1,5 @@
 import os
+import sys
 import subprocess
 import shutil
 import re
@@ -8,6 +9,8 @@ import math
 from PyFoam.RunDictionary.SolutionDirectory import SolutionDirectory
 from PyFoam.RunDictionary.ParsedParameterFile import ParsedParameterFile
 from PyFoam.Execution.BasicRunner import BasicRunner
+
+import metrics
 
 GEOMETRY_STL  = "uav.stl"
 CASE_TEMPLATE = "case_template_supersonic"
@@ -21,6 +24,8 @@ END_TIME      = 0.01         # [s]
 WRITE_INTERVAL = 0.001       # [s]
 RESULTS_CSV   = "results_supersonic.csv"
 
+HALF_MODEL    = True
+SYMMETRY      = 2.0 if HALF_MODEL else 1.0
 
 def main():
     atm   = isa_atmosphere(ALTITUDE_M)
@@ -29,8 +34,11 @@ def main():
     print(f"Mach {MACH} | {ALTITUDE_M/1000:.0f} km ISA | U={u_inf:.1f} m/s | "
           f"p={atm['p']} Pa | T={atm['T']} K | rho={atm['rho']} kg/m3")
 
-    initialize_results_csv()
-    design_point(atm, u_inf)
+    results = design_point(atm, u_inf)
+    if results is None:
+        print("Run did not produce metrics.")
+        return 1
+    return 0 if results.get("converged") else 2
 
 def design_point(atm, u_inf):
     job_id = f"run_{uuid.uuid4().hex[:8]}"
@@ -41,13 +49,13 @@ def design_point(atm, u_inf):
     print(f"{'='*40}")
 
     # 1. Prepare Case Directory
-    print("[1/5] Preparing case from template...")
+    print("[1/6] Preparing case from template...")
     if not prepare(job_directory, atm, u_inf):
         print(f"Error: Failed to prepare case for {job_id}. Skipping...")
         return None
 
     # 2. Mesh Generation
-    print("[2/5] Generating mesh (snappyHexMesh)...")
+    print("[2/6] Generating mesh (snappyHexMesh)...")
     try:
         if not mesh(job_directory):
             print(f"Error: Meshing failed to produce polyMesh for {job_id}. Skipping...")
@@ -56,7 +64,7 @@ def design_point(atm, u_inf):
         print(f"Exception during meshing: {e}")
 
     # 3. Solve
-    print("[3/5] Solving (rhoCentralFoam)...")
+    print("[3/6] Solving (rhoCentralFoam)...")
     try:
         if not solve(job_directory):
             print(f"Error: Solver failed to complete for {job_id}. Skipping...")
@@ -64,15 +72,28 @@ def design_point(atm, u_inf):
     except Exception as e:
         print(f"Exception during solving: {e}")
 
-    # 4. Post Processing
-    print("[4/5] Post processing in Paraview...")
-    results = post_process(job_id)
+    # 4. Metrics
+    print("[4/6] Extracting converged metrics...")
+    results = metrics.write_metrics(job_directory, symmetry_factor=SYMMETRY)
+    print(metrics.format_summary(results))
+    metrics.append_results_csv(results, RESULTS_CSV, case_name=job_id)
+    print(f"[*] Appended {job_id} to {RESULTS_CSV}")
 
-    # 5. Clean Up
-    print("[5/5] Cleaning up heavy mesh/processor files...")
+    if not results.get("converged"):
+        print(f"WARNING: {job_id} did not meet the convergence tolerance "
+              f"(drag drift {results.get('drag_drift_pct')} %). "
+              f"Treat this result as unusable.")
+
+    # 5. Post Processing
+    print("[5/6] Post processing in Paraview...")
+    post_process(job_id)
+
+    # 6. Clean Up
+    print("[6/6] Cleaning up mesh/processor files...")
     cleanup(job_directory)
 
     print(f"Successfully completed {job_id}!")
+    return results
 
 def isa_atmosphere(altitude_m):
     g0 = 9.80665;  R = 287.058;  gamma = 1.4
@@ -93,19 +114,6 @@ def isa_atmosphere(altitude_m):
     mu  = 1.458e-6 * T**1.5 / (T + 110.4)
     nu  = mu / rho
     return dict(T=round(T,4), p=round(p,2), rho=round(rho,6), a=round(a,4), mu=mu, nu=nu)
-
-def initialize_results_csv():
-    if os.path.exists(RESULTS_CSV):
-        os.remove(RESULTS_CSV)
-        print(f"[*] Deleted existing {RESULTS_CSV}")
-    with open(RESULTS_CSV, mode='w', newline='') as f:
-        csv.writer(f).writerow(["Alpha", "CL", "CD", "LD_ratio", "CM", "Avg_yPlus", "Max_yPlus"])
-    print(f"[*] Initialized fresh {RESULTS_CSV}")
-
-def append_result(row):
-    with open(RESULTS_CSV, mode='a', newline='') as f:
-        csv.DictWriter(f, fieldnames=["Alpha", "CL", "CD", "LD_ratio", "CM",
-                                      "Avg_yPlus", "Max_yPlus"]).writerow(row)
 
 def prepare(job_directory, atm, u_inf):
     try:
@@ -224,4 +232,4 @@ def cleanup(job_directory):
         subprocess.run(command, shell=True, capture_output=True, text=True)
 
 if __name__ == "__main__":
-    main()
+    sys.exit(main())
