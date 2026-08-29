@@ -31,18 +31,18 @@ geometry
     shockAndWakeBox
     {
         type searchableBox;
-        min (-1.5 -1.5 -2);
-        max ( 5.0  1.5  2);
+        min (-1.5 -2.3 -2);
+        max ( 5.0  2.3  2);
     }
 }
 
 castellatedMeshControls
 {
     maxLocalCells 1000000;
-    maxGlobalCells 5000000;
+    maxGlobalCells 20000000;
     minRefinementCells 10;
     maxLoadUnbalance 0.10;
-    nCellsBetweenLevels 7;
+    nCellsBetweenLevels 5;
 
     features
     (
