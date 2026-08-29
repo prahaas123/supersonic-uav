@@ -2,13 +2,13 @@ import subprocess
 import os
 
 def create_uav_model(
-    y_rotation=5.0, 
-    seg1_root_chord=4.0, 
-    seg1_span=0.75, 
-    seg1_tip_chord=1.6, 
+    y_rotation=1.0,
+    seg1root_chord=4.0,
+    seg1_span=0.75,
+    seg2root_chord=1.6,
     seg1_sweep=73.0,
-    seg2_span=1.0, 
-    seg2_tip_chord=0.8, 
+    seg2_span=1.0,
+    seg2tip_chord=0.8,
     seg2_sweep=45.0,
     tc_root=0.025,   # XSecCurve_0
     tc_break=0.035,  # XSecCurve_1
@@ -28,7 +28,7 @@ void main() {{
     SetGeomName(wing_id, "WingGeom");
 
     // Set pitch (Y Rotation) and planar symmetry (XZ plane)
-    SetParmVal(wing_id, "Y_Rotation", "XForm", {y_rotation});
+    SetParmVal(wing_id, "Y_Rel_Rotation", "XForm", {y_rotation});
     SetParmVal(wing_id, "Sym_Planar_Flag", "Sym", 2.0); 
 
     // Insert a cross-section to create 2 segments
@@ -36,15 +36,15 @@ void main() {{
     Update(); 
 
     // --- Wing Segment 1 (Root to Break) ---
-    SetParmVal(wing_id, "Root_Chord", "XSec_1", {seg1_root_chord}); 
+    SetParmVal(wing_id, "Root_Chord", "XSec_1", {seg1root_chord});
     SetParmVal(wing_id, "Span", "XSec_1", {seg1_span});
-    SetParmVal(wing_id, "Tip_Chord", "XSec_1", {seg1_tip_chord});
     SetParmVal(wing_id, "Sweep", "XSec_1", {seg1_sweep});
     SetParmVal(wing_id, "Sweep_Location", "XSec_1", 0.0); // Sweep Location kept static
 
     // --- Wing Segment 2 (Break to Tip) ---
+    SetParmVal(wing_id, "Root_Chord", "XSec_2", {seg2root_chord});
     SetParmVal(wing_id, "Span", "XSec_2", {seg2_span});
-    SetParmVal(wing_id, "Tip_Chord", "XSec_2", {seg2_tip_chord});
+    SetParmVal(wing_id, "Tip_Chord", "XSec_2", {seg2tip_chord});
     SetParmVal(wing_id, "Sweep", "XSec_2", {seg2_sweep});
     SetParmVal(wing_id, "Sweep_Location", "XSec_2", 0.0); // Sweep Location kept static
 
