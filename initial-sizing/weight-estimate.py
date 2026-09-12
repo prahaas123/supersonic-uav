@@ -6,6 +6,7 @@ from matplotlib.widgets import Slider
 MTOW = 18.7              # Maximum Takeoff Weight (kg)
 ENGINE_WEIGHT = 4.38     # Engine weight (kg)
 FUEL_FLOW = 0.00615      # Fuel flow rate (kg/s)
+U_CRUISE = 442.6         # Cruise speed (m/s) -- M 1.5 at 15,000 m
 
 INIT_STRUCT_WEIGHT = 4.0 # Default structural weight (kg)
 
@@ -14,8 +15,9 @@ def calculate_available_mass(struct_wt):
 
 # Plots
 fig, (ax1, ax2) = plt.subplots(2, 1, figsize=(9, 8))
-plt.subplots_adjust(left=0.1, bottom=0.1, right=0.75, top=0.9, hspace=0.3)
+plt.subplots_adjust(left=0.1, bottom=0.1, right=0.72, top=0.9, hspace=0.35)
 ax_slider = plt.axes([0.85, 0.15, 0.04, 0.7])
+ax2r = ax2.twinx()
 
 # Structural weight slider
 struct_slider = Slider(
@@ -30,10 +32,13 @@ struct_slider = Slider(
 def update(val):
     struct_wt = struct_slider.val
     available_mass = calculate_available_mass(struct_wt)
-    
+
     ax1.clear()
     ax2.clear()
-    
+    ax2r.clear()
+    ax2r.yaxis.tick_right()
+    ax2r.yaxis.set_label_position('right')
+
     if available_mass <= 0:
         ax1.text(0.5, 0.5, "MTOW Exceeded by Structure/Engine", ha='center', va='center', color='red', fontsize=12)
         ax2.text(0.5, 0.5, "MTOW Exceeded", ha='center', va='center', color='red', fontsize=12)
@@ -41,7 +46,8 @@ def update(val):
         fuel_weights = np.linspace(0, available_mass, 100)
         payload_weights = available_mass - fuel_weights
         endurance_mins = (fuel_weights / FUEL_FLOW) / 60.0
-        
+        range_km = (fuel_weights / FUEL_FLOW) * U_CRUISE / 1000.0
+
         # Plot 1: Payload vs Fuel
         ax1.plot(fuel_weights, payload_weights, linewidth=2, color='blue')
         ax1.fill_between(fuel_weights, payload_weights, alpha=0.1, color='blue')
@@ -51,16 +57,19 @@ def update(val):
         ax1.grid(True, linestyle='--', alpha=0.7)
         ax1.set_xlim([0, available_mass])
         ax1.set_ylim([0, max(payload_weights) if max(payload_weights) > 0 else 1])
-        
-        # Plot 2: Endurance vs Fuel
+
+        # Plot 2: Endurance and Range vs Fuel
         ax2.plot(fuel_weights, endurance_mins, linewidth=2, color='green')
         ax2.fill_between(fuel_weights, endurance_mins, alpha=0.1, color='green')
-        ax2.set_title(f"Endurance vs. Fuel Mass")
+        ax2r.plot(fuel_weights, range_km, linewidth=0)  # shares shape, scaled axis only
+        ax2.set_title(f"Endurance and Range vs. Fuel Mass (M 1.5, U = {U_CRUISE} m/s)")
         ax2.set_xlabel("Fuel Mass (kg)")
-        ax2.set_ylabel("Endurance (minutes)")
+        ax2.set_ylabel("Endurance (minutes)", color='green')
+        ax2r.set_ylabel("Range (km)", color='darkred')
         ax2.grid(True, linestyle='--', alpha=0.7)
         ax2.set_xlim([0, available_mass])
         ax2.set_ylim([0, max(endurance_mins) if max(endurance_mins) > 0 else 1])
+        ax2r.set_ylim([0, max(range_km) if max(range_km) > 0 else 1])
 
     fig.canvas.draw_idle()
 
