@@ -44,7 +44,7 @@ boundaryField
 
     uav
     {
-        type            nutUSpaldingWallFunction;
+        type            nutkWallFunction;
         value           uniform 0;
     }
 }

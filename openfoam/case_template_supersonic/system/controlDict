@@ -21,7 +21,7 @@ stopAt          endTime;
 endTime         1e-2;
 deltaT          1e-8;
 writeControl    adjustable;
-writeInterval   1e-3;
+writeInterval   2e-6;
 purgeWrite      2;
 writeFormat     binary;
 writePrecision  15;
