@@ -20,7 +20,7 @@ CG_X          = 0.5         # [m] moment reference point
 REF_CHORD     = 3.0         # [m]
 REF_AREA      = 0.60        # [m2]
 NP            = 30           # MPI processes
-END_TIME      = 0.01         # [s]
+END_TIME      = 0.05         # [s]
 WRITE_INTERVAL = 2e-6        # [s]
 RESULTS_CSV   = "results_supersonic.csv"
 
