@@ -168,37 +168,14 @@ def extract_metrics(case_dir,
     return out
 
 
-def write_metrics(case_dir, path=None, **kwargs):
+def write_metrics(case_dir, path=None, extra=None, **kwargs):
     m = extract_metrics(case_dir, **kwargs)
+    if extra:
+        m.update(extra)
     path = path or os.path.join(case_dir, "metrics.json")
     with open(path, "w") as fh:
         json.dump(m, fh, indent=2)
     return m
-
-CSV_FIELDS = [
-    "case", "status", "converged",
-    "drag_N", "lift_N", "drag_pressure_N", "drag_viscous_N", "cm_pitch_Nm",
-    "Cd", "Cl", "CmPitch", "LD_ratio",
-    "drag_drift_pct", "lift_drift_pct", "drag_std_N", "lift_std_N",
-    "yplus_avg", "yplus_max", "side_force_raw_N",
-    "t_end", "n_window_samples",
-]
-
-
-def append_results_csv(m, csv_path, case_name=None):
-    import csv
-
-    row = {k: m.get(k) for k in CSV_FIELDS}
-    row["case"] = case_name or os.path.basename(os.path.normpath(m.get("case", "")))
-
-    exists = os.path.isfile(csv_path)
-    with open(csv_path, "a", newline="") as fh:
-        writer = csv.DictWriter(fh, fieldnames=CSV_FIELDS)
-        if not exists:
-            writer.writeheader()
-        writer.writerow(row)
-    return csv_path
-
 
 def format_summary(m):
     def fmt(key, spec=".4f", default="n/a"):
@@ -233,6 +210,7 @@ def format_summary(m):
         f"  y+  avg / max     :  {fmt('yplus_avg', '.2f')} / {fmt('yplus_max', '.2f')}",
         f"  side force (raw)  :  {fmt('side_force_raw_N', '10.3f')} N  "
         f"[half-model diagnostic, not an aircraft load]",
+        f"  mesh / solve time :  {fmt('mesh_time_s', '.1f')} / {fmt('solve_time_s', '.1f')} s",
         bar,
         f"  CONVERGED: {m.get('converged')}",
         bar, "",

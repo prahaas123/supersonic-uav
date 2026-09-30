@@ -3,9 +3,9 @@ import sys
 import subprocess
 import shutil
 import re
-import csv
 import uuid
 import math
+import time
 from PyFoam.RunDictionary.SolutionDirectory import SolutionDirectory
 from PyFoam.RunDictionary.ParsedParameterFile import ParsedParameterFile
 from PyFoam.Execution.BasicRunner import BasicRunner
@@ -20,9 +20,8 @@ CG_X          = 0.5         # [m] moment reference point
 REF_CHORD     = 3.0         # [m]
 REF_AREA      = 0.60        # [m2]
 NP            = 30           # MPI processes
-END_TIME      = 0.05         # [s]
-WRITE_INTERVAL = 2e-6        # [s]
-RESULTS_CSV   = "results_supersonic.csv"
+END_TIME      = 0.02         # [s]
+WRITE_INTERVAL = END_TIME    # [s] fields written only at the final time
 
 HALF_MODEL    = True
 SYMMETRY      = 2.0 if HALF_MODEL else 1.0
@@ -56,12 +55,14 @@ def design_point(atm, u_inf):
 
     # 2. Mesh Generation
     print("[2/6] Generating mesh (snappyHexMesh)...")
+    t_start = time.perf_counter()
     try:
         if not mesh(job_directory):
             print(f"Error: Meshing failed to produce polyMesh for {job_id}. Skipping...")
             return None
     except Exception as e:
         print(f"Exception during meshing: {e}")
+    t_meshed = time.perf_counter()
 
     # 3. Solve
     print("[3/6] Solving (rhoCentralFoam)...")
@@ -71,13 +72,19 @@ def design_point(atm, u_inf):
             return None
     except Exception as e:
         print(f"Exception during solving: {e}")
+    t_solved = time.perf_counter()
+
+    timings = {
+        "mesh_time_s":  round(t_meshed - t_start, 1),
+        "solve_time_s": round(t_solved - t_meshed, 1),
+        "runtime_s":    round(t_solved - t_start, 1),
+    }
 
     # 4. Metrics
     print("[4/6] Extracting converged metrics...")
-    results = metrics.write_metrics(job_directory, symmetry_factor=SYMMETRY)
+    results = metrics.write_metrics(job_directory, symmetry_factor=SYMMETRY,
+                                    extra=timings)
     print(metrics.format_summary(results))
-    metrics.append_results_csv(results, RESULTS_CSV, case_name=job_id)
-    print(f"[*] Appended {job_id} to {RESULTS_CSV}")
 
     if not results.get("converged"):
         print(f"WARNING: {job_id} did not meet the convergence tolerance "

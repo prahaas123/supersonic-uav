@@ -18,11 +18,11 @@ application     rhoCentralFoam;
 startFrom       latestTime;
 startTime       0;
 stopAt          endTime;
-endTime         5e-2;
+endTime         2e-2;
 deltaT          1e-8;
 writeControl    adjustable;
-writeInterval   2e-6;
-purgeWrite      2;
+writeInterval   5e-2;       // = endTime: fields written only at the final time
+purgeWrite      0;
 writeFormat     binary;
 writePrecision  15;
 writeCompression off;
@@ -80,6 +80,7 @@ functions
     {
         type            yPlus;
         libs            (fieldFunctionObjects);
+        executeControl  writeTime;
         writeControl    writeTime;
         patches         (uav);
     }
@@ -88,6 +89,7 @@ functions
     {
         type            MachNo;
         libs            (fieldFunctionObjects);
+        executeControl  writeTime;
         writeControl    writeTime;
     }
 
@@ -99,6 +101,7 @@ functions
         pInf            12112;
         UInf            (442.6 0 0);
         rhoInf          0.1948;
+        executeControl  writeTime;
         writeControl    writeTime;
     }
 
@@ -108,6 +111,7 @@ functions
         libs            (fieldFunctionObjects);
         patches         (uav); 
         writeToFile     true;
+        executeControl  writeTime;
         writeControl    writeTime;
         writeInterval   1;
     }
