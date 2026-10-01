@@ -32,7 +32,7 @@ geometry
     {
         type searchableBox;
         min (-1.5 -2.3 -2);
-        max ( 5.0  2.3  2);
+        max ( 6.5  2.3  2);
     }
 }
 
@@ -102,11 +102,11 @@ addLayersControls
     {
         uav
         {
-            nSurfaceLayers 7;
+            nSurfaceLayers 4;
         }
     }
 
-    expansionRatio 1.3;
+    expansionRatio 1.15;
     finalLayerThickness 0.5;
     minThickness 0.01;
     nGrow 0;

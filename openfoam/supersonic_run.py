@@ -19,7 +19,7 @@ MACH          = 1.5
 CG_X          = 0.5         # [m] moment reference point
 REF_CHORD     = 3.0         # [m]
 REF_AREA      = 0.60        # [m2]
-NP            = 30           # MPI processes
+NP            = 50           # MPI processes
 END_TIME      = 0.02         # [s]
 WRITE_INTERVAL = END_TIME    # [s] fields written only at the final time
 
