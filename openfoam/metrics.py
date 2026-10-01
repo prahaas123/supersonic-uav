@@ -211,6 +211,7 @@ def format_summary(m):
         f"  side force (raw)  :  {fmt('side_force_raw_N', '10.3f')} N  "
         f"[half-model diagnostic, not an aircraft load]",
         f"  mesh / solve time :  {fmt('mesh_time_s', '.1f')} / {fmt('solve_time_s', '.1f')} s",
+        f"  total time        :  {fmt('total_time_s', '.1f')} s",
         bar,
         f"  CONVERGED: {m.get('converged')}",
         bar, "",

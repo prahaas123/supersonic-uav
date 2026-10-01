@@ -77,7 +77,7 @@ def design_point(atm, u_inf):
     timings = {
         "mesh_time_s":  round(t_meshed - t_start, 1),
         "solve_time_s": round(t_solved - t_meshed, 1),
-        "runtime_s":    round(t_solved - t_start, 1),
+        "total_time_s": round(t_solved - t_start, 1),
     }
 
     # 4. Metrics

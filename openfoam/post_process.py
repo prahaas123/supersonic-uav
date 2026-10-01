@@ -206,9 +206,21 @@ def print_and_plot_stats():
                          _read_dat, SYMMETRY_FACTOR, TAIL_FRACTION)
 
     m = extract_metrics(base_case_dir)
+
+    # Keep timings written by supersonic_run.py
+    metrics_path = os.path.join(base_case_dir, "metrics.json")
+    try:
+        with open(metrics_path) as fh:
+            prev = json.load(fh)
+        for key in ("mesh_time_s", "solve_time_s", "total_time_s"):
+            if key in prev:
+                m[key] = prev[key]
+    except (OSError, ValueError):
+        pass
+
     print(format_summary(m))
 
-    with open(os.path.join(base_case_dir, "metrics.json"), "w") as fh:
+    with open(metrics_path, "w") as fh:
         json.dump(m, fh, indent=2)
 
     # Convergence plots
