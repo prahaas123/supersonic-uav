@@ -43,6 +43,19 @@ def get_latest_time(reader):
     times = reader.TimestepValues
     return times[-1] if len(times) > 0 else 0.0
 
+def reflect(source, time):
+    # Half model: mirror across the y=0 symmetry plane so images show both sides.
+    # Full models (e.g. subsonic) already extend below y=0, so leave them alone.
+    source.UpdatePipeline(time)
+    if source.GetDataInformation().GetBounds()[2] < -1e-6:
+        return source
+    reflected = Reflect(Input=source)
+    reflected.Plane = "Y"
+    reflected.Center = 0.0
+    reflected.CopyInput = 1
+    reflected.UpdatePipeline(time)
+    return reflected
+
 def save_all_views(renderView, prefix):
     for view_name, cam in VIEWS_3D.items():
         renderView.CameraPosition = cam["position"]
@@ -59,7 +72,7 @@ def geometry():
     renderView.ViewTime = latest_time
     reader.MeshRegions = ["patch/uav"]
     reader.UpdatePipeline(latest_time)
-    display = Show(reader, renderView)
+    display = Show(reflect(reader, latest_time), renderView)
     ColorBy(display, ("CELLS", ""))
     save_all_views(renderView, "geometry")
     ResetSession()
@@ -75,7 +88,7 @@ def mesh():
     renderView.CameraFocalPoint = VIEW_2D_SLICE["focal_point"]
     renderView.CameraViewUp = VIEW_2D_SLICE["view_up"]
     renderView.OrientationAxesVisibility = 0
-    slice = Slice(Input=reader1)
+    slice = Slice(Input=reflect(reader1, latest_time))
     slice.SliceType = "Plane"
     slice.SliceType.Origin = [0.4, 0.6, 0.25]
     slice.SliceType.Normal = [0, 1, 0]
@@ -85,7 +98,7 @@ def mesh():
     ColorBy(display1, ("CELLS", ""))
     reader2.MeshRegions = ["patch/uav"]
     reader2.UpdatePipeline(latest_time)
-    display2 = Show(reader2, renderView)
+    display2 = Show(reflect(reader2, latest_time), renderView)
     display2.Representation = "Surface With Edges"
     ColorBy(display2, ("CELLS", ""))
     Render()
@@ -102,7 +115,7 @@ def cp_countour():
     renderView.ViewTime = latest_time
     pLUT = GetColorTransferFunction("p")
     HideScalarBarIfNotNeeded(pLUT, renderView)
-    calculator1 = Calculator(registrationName="Calculator1", Input=reader)
+    calculator1 = Calculator(registrationName="Calculator1", Input=reflect(reader, latest_time))
     calculator1.ResultArrayName = "Cp"
     calculator1.Function = "(p - 0)/(0.5*1.225*100)"
     calculator1.AttributeType = "Cell Data"
@@ -125,7 +138,7 @@ def pressure_slice():
     renderView.CameraPosition = VIEW_2D_SLICE["position"]
     renderView.CameraFocalPoint = VIEW_2D_SLICE["focal_point"]
     renderView.CameraViewUp = VIEW_2D_SLICE["view_up"]
-    slice = Slice(Input=reader)
+    slice = Slice(Input=reflect(reader, latest_time))
     slice.SliceType = "Plane"
     slice.SliceType.Origin = VIEW_2D_SLICE["slice-origin"]
     slice.SliceType.Normal = VIEW_2D_SLICE["slice-normal"]
@@ -149,7 +162,7 @@ def velocity_slice():
     renderView.CameraPosition = VIEW_2D_SLICE["position"]
     renderView.CameraFocalPoint = VIEW_2D_SLICE["focal_point"]
     renderView.CameraViewUp = VIEW_2D_SLICE["view_up"]
-    slice = Slice(Input=reader)
+    slice = Slice(Input=reflect(reader, latest_time))
     slice.SliceType = "Plane"
     slice.SliceType.Origin = VIEW_2D_SLICE["slice-origin"]
     slice.SliceType.Normal = VIEW_2D_SLICE["slice-normal"]
@@ -173,7 +186,7 @@ def wall_shear():
     reader.UpdatePipeline(latest_time)
     wallShearStressLUT = GetColorTransferFunction("wallShearStress")
     HideScalarBarIfNotNeeded(wallShearStressLUT, renderView)
-    display1 = Show(reader, renderView)
+    display1 = Show(reflect(reader, latest_time), renderView)
     UpdateScalarBarsComponentTitle(wallShearStressLUT, display1)
     ColorBy(display1, ("CELLS", "wallShearStress", "X"))
     display1.RescaleTransferFunctionToDataRange(True, False)
@@ -189,7 +202,7 @@ def yplus():
     renderView.ViewTime = latest_time
     reader.MeshRegions = ["patch/uav"]
     reader.UpdatePipeline(latest_time)
-    display1 = Show(reader, renderView)
+    display1 = Show(reflect(reader, latest_time), renderView)
     ColorBy(display1, ("CELLS", "yPlus"))
     yPlusLUT = GetColorTransferFunction("yPlus")
     yPlusLUT.RescaleTransferFunction(30.0, 700.0)
