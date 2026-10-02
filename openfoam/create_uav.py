@@ -181,20 +181,16 @@ void main() {{
         with open(script_path, "w") as f:
             f.write(vspscript_content)
 
-        try:
-            vsp_command = (
-                "module swap gcc/12.3 gcc/13.3 ; "
-                f"module use \"$HOME/modulefiles\" ; "
-                "module load openvsp/3.51.0-headless ; "
-                f"vspscript -script {script_path}"
-            )
-            subprocess.run(vsp_command, shell=True, executable='/bin/bash', check=True)
-        except subprocess.CalledProcessError as e:
-            print(f"Error: OpenVSP script execution failed with code {e.returncode}")
-            return False
+        vsp_command = (
+            "module swap gcc/12.3 gcc/13.3 ; "
+            f"module use \"$HOME/modulefiles\" ; "
+            "module load openvsp/3.51.0-headless ; "
+            f"vspscript -script {script_path}"
+        )
+        result = subprocess.run(vsp_command, shell=True, executable='/bin/bash')
 
-    if not os.path.isfile(stl_path):
-        print(f"Error: OpenVSP finished but {stl_path} was not created")
+    if not os.path.isfile(stl_path) or os.path.getsize(stl_path) == 0:
+        print(f"Error: OpenVSP did not create {stl_path} (vspscript exit code {result.returncode})")
         return False
 
     print(f"Model created. Exported {stl_path}")
