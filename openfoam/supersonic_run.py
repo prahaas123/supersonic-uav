@@ -11,8 +11,8 @@ from PyFoam.RunDictionary.ParsedParameterFile import ParsedParameterFile
 from PyFoam.Execution.BasicRunner import BasicRunner
 
 import metrics
+from create_uav import create_uav_model
 
-GEOMETRY_STL  = "uav.stl"
 CASE_TEMPLATE = "case_template_supersonic"
 ALTITUDE_M    = 15000.0     # [m]
 MACH          = 1.5
@@ -25,6 +25,36 @@ WRITE_INTERVAL = END_TIME    # [s] fields written only at the final time
 
 HALF_MODEL    = True
 SYMMETRY      = 2.0 if HALF_MODEL else 1.0
+
+# Aircraft geometry (wing parameters passed to create_uav_model; fuselage is fixed there)
+UAV_PARAMS = dict(
+    # Wing placement
+    x_location=0.0,
+    z_location=0.08,
+    y_rotation=1.5,
+    # Segment 1 (root to break)
+    seg1root_chord=4.0,
+    seg2root_chord=1.6,  # break chord
+    seg1_span=0.75,
+    seg1_sweep=73.0,
+    seg1_twist=0.0,
+    seg1_dihedral=0.0,
+    # Segment 2 (break to tip)
+    seg2tip_chord=0.8,
+    seg2_span=1.0,
+    seg2_sweep=48.0,
+    seg2_twist=-2.5,
+    seg2_dihedral=0.0,
+    # Airfoils (double wedge)
+    tc_root=0.025,
+    tc_break=0.035,
+    tc_tip=0.050,
+    thick_loc=0.5,
+    # Wing tessellation
+    wing_tess_w=101,
+    seg1_tess_u=35,
+    seg2_tess_u=35,
+)
 
 def main():
     atm   = isa_atmosphere(ALTITUDE_M)
@@ -48,7 +78,7 @@ def design_point(atm, u_inf):
     print(f"{'='*40}")
 
     # 1. Prepare Case Directory
-    print("[1/6] Preparing case from template...")
+    print("[1/6] Preparing case from template and generating UAV STL (OpenVSP)...")
     if not prepare(job_directory, atm, u_inf):
         print(f"Error: Failed to prepare case for {job_id}. Skipping...")
         return None
@@ -163,14 +193,17 @@ def prepare(job_directory, atm, u_inf):
             f.write(f"kinf  {k_inf:.6g};\n")
             f.write(f"omegaInf {omega_inf:.6g};\n")
 
+        # Geometry: generate the UAV STL into the case
+        stl_path = os.path.join(job_directory, "constant", "triSurface", "uav.stl")
+        if not create_uav_model(stl_path=stl_path, **UAV_PARAMS):
+            return False
+
         return True
     except Exception as e:
         print(f"Exception during preparation: {e}")
         return False
 
 def mesh(job_directory):
-    os.makedirs(f"{job_directory}/constant/triSurface", exist_ok=True)
-
     COMMANDS = [
         f"surfaceFeatureExtract -case {job_directory}",
         f"blockMesh -case {job_directory}",
@@ -180,9 +213,6 @@ def mesh(job_directory):
         f"rm -rf {job_directory}/processor*",
     ]
     
-    triSurface_dir = f"{job_directory}/constant/triSurface"
-    os.makedirs(triSurface_dir, exist_ok=True)
-    shutil.copy(GEOMETRY_STL, f"{job_directory}/constant/triSurface/uav.stl")
     for command in COMMANDS:
         print(f"  -> Executing: {command}")
         result = subprocess.run(command, shell=True, executable='/bin/bash')

@@ -1,5 +1,6 @@
 import subprocess
 import os
+import tempfile
 
 FUSELAGE_LENGTH = 5.0
 FUSELAGE_X_LOCATION = -0.2459016393442627901
@@ -170,20 +171,34 @@ void main() {{
 }}
     """
 
-    with open(script_filename, "w") as f:
-        f.write(vspscript_content)
+    # Remove any stale STL so success can be checked by the file existing
+    if os.path.exists(stl_path):
+        os.remove(stl_path)
 
-    try:
-        vsp_command = (
-            "module swap gcc/12.3 gcc/13.3 ; "
-            f"module use \"$HOME/modulefiles\" ; "
-            "module load openvsp/3.51.0-headless ; "
-            f"vspscript -script {script_filename}"
-        )
-        subprocess.run(vsp_command, shell=True, executable='/bin/bash', check=True)
-        print(f"Model created. Exported {stl_path}")
-    except subprocess.CalledProcessError as e:
-        print(f"Error: OpenVSP script execution failed with code {e.returncode}")
+    # Script lives in a temp dir so nothing is left behind and parallel runs don't collide
+    with tempfile.TemporaryDirectory() as tmp_dir:
+        script_path = os.path.join(tmp_dir, script_filename)
+        with open(script_path, "w") as f:
+            f.write(vspscript_content)
+
+        try:
+            vsp_command = (
+                "module swap gcc/12.3 gcc/13.3 ; "
+                f"module use \"$HOME/modulefiles\" ; "
+                "module load openvsp/3.51.0-headless ; "
+                f"vspscript -script {script_path}"
+            )
+            subprocess.run(vsp_command, shell=True, executable='/bin/bash', check=True)
+        except subprocess.CalledProcessError as e:
+            print(f"Error: OpenVSP script execution failed with code {e.returncode}")
+            return False
+
+    if not os.path.isfile(stl_path):
+        print(f"Error: OpenVSP finished but {stl_path} was not created")
+        return False
+
+    print(f"Model created. Exported {stl_path}")
+    return True
 
 if __name__ == "__main__":
     create_uav_model()
