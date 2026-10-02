@@ -28,6 +28,28 @@ VIEW_2D_SLICE = {
     "slice-normal": [0, 1, 0]
 }
 
+# Freestream for Cp: fixed Mach 1.5 at 15,000 m ISA
+MACH_INF = 1.5
+P_INF = 12111.8                              # [Pa] ISA static pressure at 15 km
+Q_INF = 0.5 * 1.4 * P_INF * MACH_INF**2      # [Pa] dynamic pressure, 0.5*gamma*p*M^2
+CP_RANGE = [-0.4, 1.0]
+
+# Cross-flow Mach slices (x-normal)
+MACH_STATIONS = {
+    "forebody": 1.0,   # nose / strake
+    "kink":     2.5,   # wing leading-edge kink
+    "midwing":  3.6,   # outer wing, near tip leading edge
+    "wake":     5.5,   # 0.75 m behind the tail
+}
+MACH_RANGE = [1.25, 1.75]
+
+# Isosurface values
+MACH_ISO = [1.45, 1.55]   # shock compression / expansion surfaces
+MACH_BOX = {"position": [-0.5, -3.0, -2.0], "length": [7.5, 6.0, 4.0]}
+Q_ISO = 1.0e7       # Q-criterion threshold [1/s^2]; 1e6 is mostly boundary-layer noise
+# Box around the UAV for the Q-criterion gradient
+Q_BOX = {"position": [-0.5, -2.5, -1.0], "length": [6.5, 5.0, 2.0]}
+
 # Validate inputs
 if len(sys.argv) < 3:
     print("Usage: pvbatch script_name.py <path_to_your_openfoam_file> <folder_to_save_images>")
@@ -117,15 +139,17 @@ def cp_countour():
     HideScalarBarIfNotNeeded(pLUT, renderView)
     calculator1 = Calculator(registrationName="Calculator1", Input=reflect(reader, latest_time))
     calculator1.ResultArrayName = "Cp"
-    calculator1.Function = "(p - 0)/(0.5*1.225*100)"
+    calculator1.Function = f"(p - {P_INF})/{Q_INF}"
     calculator1.AttributeType = "Cell Data"
     calculator1.UpdatePipeline(latest_time)
     cpLUT = GetColorTransferFunction("Cp")
     cpPWF = GetOpacityTransferFunction("Cp")
     display1 = Show(calculator1, renderView)
-    display1.RescaleTransferFunctionToDataRange(True, False)
-    display1.SetScalarBarVisibility(renderView, True)
+    # Show() auto-colours by p, so switch to Cp before rescaling and adding the bar
     ColorBy(display1, ("CELLS", "Cp"))
+    HideScalarBarIfNotNeeded(pLUT, renderView)
+    cpLUT.RescaleTransferFunction(*CP_RANGE)
+    display1.SetScalarBarVisibility(renderView, True)
     save_all_views(renderView, "cp-contour")
     ResetSession()
     
@@ -153,27 +177,101 @@ def pressure_slice():
     SaveScreenshot(f"{job_directory}/slice-pressure.png", renderView, ImageResolution=renderView.ViewSize)
     ResetSession()
 
-def velocity_slice():
+def mach_slices():
     reader = OpenDataFile(input_filepath)
     latest_time = get_latest_time(reader)
+    reflected = reflect(reader, latest_time)
+    for name, x in MACH_STATIONS.items():
+        renderView = CreateView("RenderView")
+        renderView.ViewSize = VIEW_SIZE_STANDARD
+        renderView.ViewTime = latest_time
+        # Look upstream from behind the station
+        renderView.CameraPosition = [x + 10.0, 0.0, 0.0]
+        renderView.CameraFocalPoint = [x, 0.0, 0.0]
+        renderView.CameraViewUp = [0, 0, 1]
+        renderView.CameraParallelProjection = 1
+        renderView.CameraParallelScale = 2.0
+        slice = Slice(Input=reflected)
+        slice.SliceType = "Plane"
+        slice.SliceType.Origin = [x, 0.0, 0.0]
+        slice.SliceType.Normal = [1, 0, 0]
+        slice.UpdatePipeline(latest_time)
+        display1 = Show(slice, renderView)
+        ColorBy(display1, ("CELLS", "Ma"))
+        maLUT = GetColorTransferFunction("Ma")
+        maLUT.RescaleTransferFunction(*MACH_RANGE)
+        display1.SetScalarBarVisibility(renderView, True)
+        Render()
+        SaveScreenshot(f"{job_directory}/slice-mach-{name}.png", renderView, ImageResolution=renderView.ViewSize)
+        Delete(slice)
+        Delete(renderView)
+    ResetSession()
+
+def show_body(time, renderView):
+    body = OpenDataFile(input_filepath)
+    body.MeshRegions = ["patch/uav"]
+    body.UpdatePipeline(time)
+    display = Show(reflect(body, time), renderView)
+    ColorBy(display, None)
+    return display
+
+def mach_isosurface():
+    reader = OpenDataFile(input_filepath)
+    latest_time = get_latest_time(reader)
+    reader.CellArrays = ["Ma"]
     renderView = CreateView("RenderView")
     renderView.ViewSize = VIEW_SIZE_STANDARD
     renderView.ViewTime = latest_time
-    renderView.CameraPosition = VIEW_2D_SLICE["position"]
-    renderView.CameraFocalPoint = VIEW_2D_SLICE["focal_point"]
-    renderView.CameraViewUp = VIEW_2D_SLICE["view_up"]
-    slice = Slice(Input=reflect(reader, latest_time))
-    slice.SliceType = "Plane"
-    slice.SliceType.Origin = VIEW_2D_SLICE["slice-origin"]
-    slice.SliceType.Normal = VIEW_2D_SLICE["slice-normal"]
-    slice.UpdatePipeline(latest_time)
-    display1 = Show(slice, renderView)
-    ColorBy(display1, ("CELLS", "U", "Magnitude"))
-    uLUT = GetColorTransferFunction("U")
-    uLUT.RescaleTransferFunction(50.0, 550.0)
+    box = Clip(Input=reader)
+    box.ClipType = "Box"
+    box.ClipType.Position = MACH_BOX["position"]
+    box.ClipType.Length = MACH_BOX["length"]
+    box.Crinkleclip = 1
+    contour = Contour(Input=box)
+    contour.ContourBy = ["POINTS", "Ma"]
+    contour.Isosurfaces = MACH_ISO
+    contour.ComputeScalars = 1
+    contour.UpdatePipeline(latest_time)
+    show_body(latest_time, renderView)
+    display1 = Show(reflect(contour, latest_time), renderView)
+    ColorBy(display1, ("POINTS", "Ma"))
+    maLUT = GetColorTransferFunction("Ma")
+    maLUT.RescaleTransferFunction(*MACH_ISO)
     display1.SetScalarBarVisibility(renderView, True)
-    Render()
-    SaveScreenshot(f"{job_directory}/slice-velocity.png", renderView, ImageResolution=renderView.ViewSize)
+    display1.Opacity = 0.4
+    save_all_views(renderView, "iso-mach")
+    ResetSession()
+
+def q_criterion():
+    reader = OpenDataFile(input_filepath)
+    latest_time = get_latest_time(reader)
+    reader.CellArrays = ["U", "Ma"]
+    renderView = CreateView("RenderView")
+    renderView.ViewSize = VIEW_SIZE_STANDARD
+    renderView.ViewTime = latest_time
+    # Q is a scalar, so compute it on the half model and reflect the isosurface
+    box = Clip(Input=reader)
+    box.ClipType = "Box"
+    box.ClipType.Position = Q_BOX["position"]
+    box.ClipType.Length = Q_BOX["length"]
+    box.Crinkleclip = 1
+    gradient = Gradient(Input=box)
+    gradient.ScalarArray = ["POINTS", "U"]
+    gradient.ComputeGradient = 0
+    gradient.ComputeQCriterion = 1
+    gradient.QCriterionArrayName = "Q"
+    contour = Contour(Input=gradient)
+    contour.ContourBy = ["POINTS", "Q"]
+    contour.Isosurfaces = [Q_ISO]
+    contour.ComputeScalars = 1
+    contour.UpdatePipeline(latest_time)
+    show_body(latest_time, renderView)
+    display1 = Show(reflect(contour, latest_time), renderView)
+    ColorBy(display1, ("POINTS", "Ma"))
+    maLUT = GetColorTransferFunction("Ma")
+    maLUT.RescaleTransferFunction(*MACH_RANGE)
+    display1.SetScalarBarVisibility(renderView, True)
+    save_all_views(renderView, "iso-qcriterion")
     ResetSession()
 
 def wall_shear():
@@ -289,7 +387,8 @@ def plot_residuals():
                 return 0.0
  
         solver_files = sorted(
-            glob.glob(f"{base_case_dir}/postProcessing/solverInfo/*/solverInfo.dat"),
+            # Any function object name (solverInfo, residuals, ...) writing solverInfo.dat
+            glob.glob(f"{base_case_dir}/postProcessing/*/*/solverInfo.dat"),
             key=_start_time
         )
         if not solver_files:
@@ -357,7 +456,9 @@ if __name__ == "__main__":
     mesh()
     cp_countour()
     pressure_slice()
-    velocity_slice()
+    mach_slices()
+    mach_isosurface()
+    q_criterion()
     wall_shear()
     yplus()
     print_and_plot_stats()
