@@ -1,14 +1,13 @@
 #!/bin/bash
 
-#SBATCH --job-name=grid_independence
+#SBATCH --job-name=supersonic_run
 #SBATCH --account=def-jphickey
 #SBATCH --time=2-00:00:00
 #SBATCH --nodes=1
 #SBATCH --ntasks-per-node=50
 #SBATCH --cpus-per-task=1
 #SBATCH --mem=150G
-#SBATCH --array=1-5
-#SBATCH --output=grid_independence_L%a.log
+#SBATCH --output=supersonic_run.log
 #SBATCH --open-mode=append
 
 module load StdEnv/2023
@@ -25,5 +24,4 @@ pip install --find-links=$SCRATCH/pyfoam_wheel --no-index PyFoam matplotlib
 
 export SQUEUE_FORMAT='%i","%j","%t","%M","%L","%D","%C","%m","%b","%R'
 
-# One grid level per array task; all tasks append to grid_independence.csv
-python3 grid_independence.py --levels $SLURM_ARRAY_TASK_ID
+python3 supersonic_run.py
