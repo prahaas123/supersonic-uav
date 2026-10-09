@@ -2,6 +2,7 @@
 *.txt
 .vscode
 run_*
+design_*/
 *.log
 archive
 *.vsp3

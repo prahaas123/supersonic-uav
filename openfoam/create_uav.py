@@ -1,9 +1,37 @@
 import subprocess
 import os
+import math
 import tempfile
 
 FUSELAGE_LENGTH = 5.0
 FUSELAGE_X_LOCATION = -0.2459016393442627901
+
+def reference_values(p):
+    x_le = p["x_location"]
+    seg_area, seg_mac, seg_x_mac = [], [], []
+    for c_r, c_t, span, sweep, dihedral in (
+        (p["seg1root_chord"], p["seg2root_chord"], p["seg1_span"], p["seg1_sweep"], p["seg1_dihedral"]),
+        (p["seg2root_chord"], p["seg2tip_chord"],  p["seg2_span"], p["seg2_sweep"], p["seg2_dihedral"]),
+    ):
+        b = span * math.cos(math.radians(dihedral))     # projected span
+        tan_sweep = math.tan(math.radians(sweep))
+        y_mac = b / 3.0 * (c_r + 2.0 * c_t) / (c_r + c_t)
+        seg_area.append(0.5 * b * (c_r + c_t))
+        seg_mac.append(2.0 / 3.0 * (c_r + c_t - c_r * c_t / (c_r + c_t)))
+        seg_x_mac.append(x_le + y_mac * tan_sweep)
+        x_le += b * tan_sweep
+
+    half_area = sum(seg_area)
+    mac = sum(a * c for a, c in zip(seg_area, seg_mac)) / half_area
+    x_mac_le = sum(a * x for a, x in zip(seg_area, seg_x_mac)) / half_area
+    return {
+        "ref_area": 2.0 * half_area,
+        "ref_chord": mac,
+        "cofr_x": x_mac_le + 0.25 * mac,
+        "semi_span": (p["seg1_span"] * math.cos(math.radians(p["seg1_dihedral"]))
+                      + p["seg2_span"] * math.cos(math.radians(p["seg2_dihedral"]))),
+        "tip_te_x": x_le + p["seg2tip_chord"],
+    }
 
 def create_uav_model(
     # Wing placement

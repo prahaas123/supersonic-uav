@@ -3,7 +3,7 @@ import sys
 import subprocess
 import shutil
 import re
-import uuid
+import json
 import math
 import time
 from PyFoam.RunDictionary.SolutionDirectory import SolutionDirectory
@@ -11,22 +11,19 @@ from PyFoam.RunDictionary.ParsedParameterFile import ParsedParameterFile
 from PyFoam.Execution.BasicRunner import BasicRunner
 
 import metrics
-from create_uav import create_uav_model
+from create_uav import create_uav_model, reference_values
 
 CASE_TEMPLATE = "case_template_supersonic"
 ALTITUDE_M    = 15000.0     # [m]
 MACH          = 1.5
-CG_X          = 0.5         # [m] moment reference point
-REF_CHORD     = 3.0         # [m]
-REF_AREA      = 0.60        # [m2]
 NP            = 50           # MPI processes
-END_TIME      = 0.02         # [s]
+END_TIME      = 0.03         # [s]
 WRITE_INTERVAL = END_TIME    # [s] fields written only at the final time
 
 HALF_MODEL    = True
 SYMMETRY      = 2.0 if HALF_MODEL else 1.0
 
-# Aircraft geometry (wing parameters passed to create_uav_model; fuselage is fixed there)
+# Aircraft geometry
 UAV_PARAMS = dict(
     # Wing placement
     x_location=0.0,
@@ -69,9 +66,8 @@ def main():
         return 1
     return 0 if results.get("converged") else 2
 
-def design_point(atm, u_inf):
-    job_id = f"run_{uuid.uuid4().hex[:8]}"
-    job_directory = f"./{job_id}"
+def design_point(atm, u_inf, uav_params=UAV_PARAMS, job_directory="./design_baseline"):
+    job_id = os.path.basename(os.path.normpath(job_directory))
 
     print(f"\n{'='*40}")
     print(f"Starting Simulation: {job_id}")
@@ -79,9 +75,10 @@ def design_point(atm, u_inf):
 
     # 1. Prepare Case Directory
     print("[1/6] Preparing case from template and generating UAV STL (OpenVSP)...")
-    if not prepare(job_directory, atm, u_inf):
+    refs = prepare(job_directory, atm, u_inf, uav_params)
+    if refs is None:
         print(f"Error: Failed to prepare case for {job_id}. Skipping...")
-        return None
+        return write_failure(job_directory, "prepare_failed")
 
     # 2. Mesh Generation
     print("[2/6] Generating mesh (snappyHexMesh)...")
@@ -89,9 +86,10 @@ def design_point(atm, u_inf):
     try:
         if not mesh(job_directory):
             print(f"Error: Meshing failed to produce polyMesh for {job_id}. Skipping...")
-            return None
+            return write_failure(job_directory, "mesh_failed", refs)
     except Exception as e:
         print(f"Exception during meshing: {e}")
+        return write_failure(job_directory, "mesh_failed", refs)
     t_meshed = time.perf_counter()
 
     # 3. Solve
@@ -99,9 +97,10 @@ def design_point(atm, u_inf):
     try:
         if not solve(job_directory):
             print(f"Error: Solver failed to complete for {job_id}. Skipping...")
-            return None
+            return write_failure(job_directory, "solve_failed", refs)
     except Exception as e:
         print(f"Exception during solving: {e}")
+        return write_failure(job_directory, "solve_failed", refs)
     t_solved = time.perf_counter()
 
     timings = {
@@ -113,7 +112,7 @@ def design_point(atm, u_inf):
     # 4. Metrics
     print("[4/6] Extracting converged metrics...")
     results = metrics.write_metrics(job_directory, symmetry_factor=SYMMETRY,
-                                    extra=timings)
+                                    extra={**refs, **timings})
     print(metrics.format_summary(results))
 
     if not results.get("converged"):
@@ -123,7 +122,7 @@ def design_point(atm, u_inf):
 
     # 5. Post Processing
     print("[5/6] Post processing in Paraview...")
-    post_process(job_id)
+    post_process(job_directory)
 
     # 6. Clean Up
     print("[6/6] Cleaning up mesh/processor files...")
@@ -131,6 +130,14 @@ def design_point(atm, u_inf):
 
     print(f"Successfully completed {job_id}!")
     return results
+
+def write_failure(job_directory, status, refs=None):
+    os.makedirs(job_directory, exist_ok=True)
+    with open(os.path.join(job_directory, "metrics.json"), "w") as fh:
+        json.dump({"case": os.path.abspath(job_directory), "status": status,
+                   "converged": False, **(refs or {})}, fh, indent=2)
+    cleanup(job_directory)
+    return None
 
 def isa_atmosphere(altitude_m):
     g0 = 9.80665;  R = 287.058;  gamma = 1.4
@@ -152,8 +159,10 @@ def isa_atmosphere(altitude_m):
     nu  = mu / rho
     return dict(T=round(T,4), p=round(p,2), rho=round(rho,6), a=round(a,4), mu=mu, nu=nu)
 
-def prepare(job_directory, atm, u_inf):
+def prepare(job_directory, atm, u_inf, uav_params):
     try:
+        refs = reference_values(uav_params)
+
         # Clone template
         if os.path.exists(job_directory):
             shutil.rmtree(job_directory)
@@ -169,13 +178,14 @@ def prepare(job_directory, atm, u_inf):
         cd["endTime"]       = END_TIME
         cd["writeInterval"] = WRITE_INTERVAL
         fc = cd["functions"]["forceCoeffs"]
+        cofr = f"({refs['cofr_x']:.6g} 0 0)"
         fc["magUInf"]   = u_inf
-        fc["lRef"]      = REF_CHORD
-        fc["Aref"]      = REF_AREA
+        fc["lRef"]      = refs["ref_chord"]
+        fc["Aref"]      = refs["ref_area"]
         fc["rhoInf"]    = atm["rho"]
         fc["pRef"]      = atm["p"]
-        fc["CofR"]      = f"({CG_X} 0 0)"
-        cd["functions"]["forces"]["CofR"]   = f"({CG_X} 0 0)"
+        fc["CofR"]      = cofr
+        cd["functions"]["forces"]["CofR"]   = cofr
         cd["functions"]["forces"]["rhoInf"] = atm["rho"]
         cd["functions"]["forces"]["pRef"]   = atm["p"]
         cd.writeFile()
@@ -195,13 +205,13 @@ def prepare(job_directory, atm, u_inf):
 
         # Geometry: generate the UAV STL into the case
         stl_path = os.path.join(job_directory, "constant", "triSurface", "uav.stl")
-        if not create_uav_model(stl_path=stl_path, **UAV_PARAMS):
-            return False
+        if not create_uav_model(stl_path=stl_path, **uav_params):
+            return None
 
-        return True
+        return refs
     except Exception as e:
         print(f"Exception during preparation: {e}")
-        return False
+        return None
 
 def mesh(job_directory):
     COMMANDS = [
@@ -246,8 +256,9 @@ def _is_float(s):
     try: float(s); return True
     except ValueError: return False
 
-def post_process(job_id):
-    command = f"LIBGL_ALWAYS_SOFTWARE=1 pvbatch --force-offscreen-rendering post_process.py {job_id}/{job_id}.foam {job_id}/images"
+def post_process(job_directory):
+    job_id = os.path.basename(os.path.normpath(job_directory))
+    command = f"LIBGL_ALWAYS_SOFTWARE=1 pvbatch --force-offscreen-rendering post_process.py {job_directory}/{job_id}.foam {job_directory}/images"
     try:        
         result = subprocess.run(command, shell=True, capture_output=True, text=True, executable='/bin/bash')
         if result.returncode != 0:
@@ -263,7 +274,6 @@ def cleanup(job_directory):
     COMMANDS = [
         f"rm -rf {job_directory}/processor*",
         f"rm -rf {job_directory}/PyFoam*",
-        "rm -rf PyFoam*",
     ]
     for command in COMMANDS:
         subprocess.run(command, shell=True, capture_output=True, text=True)

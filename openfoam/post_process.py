@@ -303,7 +303,7 @@ def yplus():
     display1 = Show(reflect(reader, latest_time), renderView)
     ColorBy(display1, ("CELLS", "yPlus"))
     yPlusLUT = GetColorTransferFunction("yPlus")
-    yPlusLUT.RescaleTransferFunction(30.0, 700.0)
+    yPlusLUT.RescaleTransferFunction(30.0, 300.0)
     display1.SetScalarBarVisibility(renderView, True)
     save_all_views(renderView, "yplus")
     ResetSession()
