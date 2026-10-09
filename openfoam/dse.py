@@ -1,10 +1,11 @@
 # python3 dse.py generate          write dse/designs.csv (Latin hypercube samples)
 # python3 dse.py run <design_id>   mesh, solve and extract metrics for one design (one SLURM array task, see dse_run.sh)
-# python3 dse.py collect           merge every dse/design_###/metrics.json into dse/results.csv
+# python3 dse.py collect           collects all images and writes one results csv file
 
 import csv
 import json
 import os
+import shutil
 import sys
 
 from create_uav import reference_values
@@ -13,7 +14,8 @@ N_SAMPLES   = 512
 SEED        = 42
 DSE_DIR     = "dse"
 DESIGNS_CSV = os.path.join(DSE_DIR, "designs.csv")
-RESULTS_CSV = os.path.join(DSE_DIR, "results.csv")
+RESULTS_DIR = "dse_results"
+RESULTS_CSV = os.path.join(RESULTS_DIR, "results.csv")
 
 # shockAndWakeBox in snappyHexMeshDict, designs reaching outside it are flagged at generation
 BOX_X_MAX = 6.5
@@ -106,9 +108,12 @@ def run(design_id):
 
 def collect():
     designs = read_designs()
+    os.makedirs(RESULTS_DIR, exist_ok=True)
     rows, metric_keys = [], []
+    n_images = 0
     for d in designs:
-        path = os.path.join(case_dir(d["design_id"]), "metrics.json")
+        case = case_dir(d["design_id"])
+        path = os.path.join(case, "metrics.json")
         if os.path.isfile(path):
             with open(path) as fh:
                 m = json.load(fh)
@@ -120,6 +125,14 @@ def collect():
                 metric_keys.append(k)
         rows.append({**d, **m})
 
+        # Copy images to results/images/design_###
+        images = os.path.join(case, "images")
+        if os.path.isdir(images):
+            dest = os.path.join(RESULTS_DIR, "images", os.path.basename(case))
+            shutil.rmtree(dest, ignore_errors=True)
+            shutil.copytree(images, dest)
+            n_images += 1
+
     with open(RESULTS_CSV, "w", newline="") as fh:
         writer = csv.DictWriter(fh, fieldnames=list(designs[0]) + metric_keys)
         writer.writeheader()
@@ -130,10 +143,11 @@ def collect():
         counts[r["status"]] = counts.get(r["status"], 0) + 1
     print(f"Wrote {len(rows)} rows to {RESULTS_CSV}  " +
           "  ".join(f"{k}: {v}" for k, v in sorted(counts.items())))
+    print(f"Copied images for {n_images} designs to {os.path.join(RESULTS_DIR, 'images')}")
 
 if __name__ == "__main__":
     if len(sys.argv) < 2 or sys.argv[1] not in ("generate", "run", "collect"):
-        print(__doc__)
+        print("usage: python3 dse.py generate | run <design_id> | collect")
         sys.exit(1)
     if sys.argv[1] == "generate":
         generate()
