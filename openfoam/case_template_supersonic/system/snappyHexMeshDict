@@ -97,18 +97,19 @@ snapControls
 
 addLayersControls
 {
-    relativeSizes true;
+    relativeSizes false;
     layers
     {
         uav
         {
-            nSurfaceLayers 4;
+            nSurfaceLayers 5;
         }
     }
 
-    expansionRatio 1.15;
-    finalLayerThickness 0.5;
-    minThickness 0.01;
+    thicknessModel firstAndExpansion;
+    firstLayerThickness 0.0008;
+    expansionRatio 1.2;
+    minThickness 0.0004;
     nGrow 0;
     featureAngle 130;
     slipFeatureAngle 30;
