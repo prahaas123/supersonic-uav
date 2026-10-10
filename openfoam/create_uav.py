@@ -3,15 +3,18 @@ import os
 import math
 import tempfile
 
-FUSELAGE_LENGTH = 5.0
-FUSELAGE_X_LOCATION = -0.2459016393442627901
+FUSELAGE_LENGTH = 2.3
+FUSELAGE_X_LOCATION = -0.246
+WING_Z_LOCATION = 0.05
 
 def reference_values(p):
+    break_chord = p["seg1root_chord"] * p["seg1_taper"]
+    tip_chord = break_chord * p["seg2_taper"]
     x_le = p["x_location"]
     seg_area, seg_mac, seg_x_mac = [], [], []
     for c_r, c_t, span, sweep, dihedral in (
-        (p["seg1root_chord"], p["seg2root_chord"], p["seg1_span"], p["seg1_sweep"], p["seg1_dihedral"]),
-        (p["seg2root_chord"], p["seg2tip_chord"],  p["seg2_span"], p["seg2_sweep"], p["seg2_dihedral"]),
+        (p["seg1root_chord"], break_chord, p["seg1_span"], p["seg1_sweep"], p["seg1_dihedral"]),
+        (break_chord,         tip_chord,   p["seg2_span"], p["seg2_sweep"], p["seg2_dihedral"]),
     ):
         b = span * math.cos(math.radians(dihedral))     # projected span
         tan_sweep = math.tan(math.radians(sweep))
@@ -30,24 +33,23 @@ def reference_values(p):
         "cofr_x": x_mac_le + 0.25 * mac,
         "semi_span": (p["seg1_span"] * math.cos(math.radians(p["seg1_dihedral"]))
                       + p["seg2_span"] * math.cos(math.radians(p["seg2_dihedral"]))),
-        "tip_te_x": x_le + p["seg2tip_chord"],
+        "tip_te_x": x_le + tip_chord,
     }
 
 def create_uav_model(
     # Wing placement
     x_location=0.0,
-    z_location=0.08,
     y_rotation=1.5,
     # Segment 1 (root to break)
-    seg1root_chord=4.0,
-    seg2root_chord=1.6,  # break chord (seg 1 tip / seg 2 root)
-    seg1_span=0.75,
-    seg1_sweep=73.0,
-    seg1_twist=0.0,
+    seg1root_chord=1.6,
+    seg1_taper=0.5,
+    seg1_span=0.3,
+    seg1_sweep=70.0,
+    seg1_twist=-0.75,
     seg1_dihedral=0.0,
     # Segment 2 (break to tip)
-    seg2tip_chord=0.8,
-    seg2_span=1.0,
+    seg2_taper=0.2,
+    seg2_span=0.5,
     seg2_sweep=48.0,
     seg2_twist=-2.5,
     seg2_dihedral=0.0,
@@ -55,7 +57,7 @@ def create_uav_model(
     tc_root=0.025,   # XSecCurve_0
     tc_break=0.035,  # XSecCurve_1
     tc_tip=0.050,    # XSecCurve_2
-    thick_loc=0.5,   # max-thickness location, 0.5 = symmetric diamond
+    thick_loc=0.5,   # max-thickness location
     # Wing tessellation
     wing_tess_w=101,
     seg1_tess_u=35,
@@ -63,7 +65,6 @@ def create_uav_model(
     stl_path="recreated_uav.stl"
 ):
 
-    # Absolute path with forward slashes so it is safe inside the vspscript string
     stl_path = os.path.abspath(stl_path)
     os.makedirs(os.path.dirname(stl_path), exist_ok=True)
     stl_path_vsp = stl_path.replace("\\", "/")
@@ -81,7 +82,7 @@ void main() {{
 
     // Placement, pitch (Y Rotation) and planar symmetry (XZ plane)
     SetParmVal(wing_id, "X_Rel_Location", "XForm", {x_location});
-    SetParmVal(wing_id, "Z_Rel_Location", "XForm", {z_location});
+    SetParmVal(wing_id, "Z_Rel_Location", "XForm", {WING_Z_LOCATION});
     SetParmVal(wing_id, "Y_Rel_Rotation", "XForm", {y_rotation});
     SetParmVal(wing_id, "Sym_Planar_Flag", "Sym", 2.0);
 
@@ -89,9 +90,23 @@ void main() {{
     InsertXSec(wing_id, 1, XS_WEDGE);
     Update();
 
+    // --- Wing Airfoils (Double Wedge) ---
+    // Shapes are set before the driver groups, ChangeXSecShape resets them
+    string wing_xsec_surf = GetXSecSurf(wing_id, 0);
+    for (int i = 0; i < 3; i++) {{
+        ChangeXSecShape(wing_xsec_surf, i, XS_WEDGE);
+    }}
+    Update();
+
+    // Both segments driven by Span, Root Chord and Taper (as in uav.vsp3)
+    for (int i = 1; i < 3; i++) {{
+        SetDriverGroup(wing_id, i, SPAN_WSECT_DRIVER, ROOTC_WSECT_DRIVER, TAPER_WSECT_DRIVER);
+    }}
+    Update();
+
     // --- Wing Segment 1 (Root to Break) ---
     SetParmVal(wing_id, "Root_Chord", "XSec_1", {seg1root_chord});
-    SetParmVal(wing_id, "Tip_Chord", "XSec_1", {seg2root_chord});
+    SetParmVal(wing_id, "Taper", "XSec_1", {seg1_taper});
     SetParmVal(wing_id, "Span", "XSec_1", {seg1_span});
     SetParmVal(wing_id, "Sweep", "XSec_1", {seg1_sweep});
     SetParmVal(wing_id, "Sweep_Location", "XSec_1", 0.0); // Sweep Location kept static
@@ -101,8 +116,7 @@ void main() {{
     Update();
 
     // --- Wing Segment 2 (Break to Tip) ---
-    SetParmVal(wing_id, "Root_Chord", "XSec_2", {seg2root_chord});
-    SetParmVal(wing_id, "Tip_Chord", "XSec_2", {seg2tip_chord});
+    SetParmVal(wing_id, "Taper", "XSec_2", {seg2_taper});
     SetParmVal(wing_id, "Span", "XSec_2", {seg2_span});
     SetParmVal(wing_id, "Sweep", "XSec_2", {seg2_sweep});
     SetParmVal(wing_id, "Sweep_Location", "XSec_2", 0.0); // Sweep Location kept static
@@ -111,14 +125,6 @@ void main() {{
     SetParmVal(wing_id, "SectTess_U", "XSec_2", {seg2_tess_u});
 
     SetParmVal(wing_id, "Tess_W", "Shape", {wing_tess_w});
-
-    // --- Wing Airfoils (Double Wedge) ---
-    string wing_xsec_surf = GetXSecSurf(wing_id, 0);
-
-    // Iterate through all 3 XSecs to ensure all shapes are Wedge
-    for (int i = 0; i < 3; i++) {{
-        ChangeXSecShape(wing_xsec_surf, i, XS_WEDGE);
-    }}
     Update();
 
     // Set Thickness-to-Chord ratio and thickness location for each curve
@@ -153,13 +159,13 @@ void main() {{
 
     // Set Locations & Diameters using exact internal parameters
     SetParmVal(fuse_id, "XLocPercent", "XSec_1", 0.15);
-    SetParmVal(fuse_id, "Circle_Diameter", "XSecCurve_1", 0.30);
+    SetParmVal(fuse_id, "Circle_Diameter", "XSecCurve_1", 0.13);
 
     SetParmVal(fuse_id, "XLocPercent", "XSec_2", 0.5);
-    SetParmVal(fuse_id, "Circle_Diameter", "XSecCurve_2", 0.35);
+    SetParmVal(fuse_id, "Circle_Diameter", "XSecCurve_2", 0.15);
 
     SetParmVal(fuse_id, "XLocPercent", "XSec_3", 0.8422131147540983243);
-    SetParmVal(fuse_id, "Circle_Diameter", "XSecCurve_3", 0.30);
+    SetParmVal(fuse_id, "Circle_Diameter", "XSecCurve_3", 0.14);
 
     SetParmVal(fuse_id, "XLocPercent", "XSec_4", 1.0);
 

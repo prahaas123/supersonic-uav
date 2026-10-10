@@ -18,17 +18,19 @@ RESULTS_DIR = "dse_results"
 RESULTS_CSV = os.path.join(RESULTS_DIR, "results.csv")
 
 # shockAndWakeBox in snappyHexMeshDict, designs reaching outside it are flagged at generation
-BOX_X_MAX = 6.5
-BOX_Y_MAX = 2.3
+BOX_X_MAX = 4.2
+BOX_Y_MAX = 1.6
 
 # Sampled variables: name -> (lower, upper)
 VARIABLES = {
-    "seg1root_chord": (3.0, 4.5),
-    "taper_break":    (0.30, 0.60),   # seg2root_chord / seg1root_chord
-    "taper_tip":      (0.30, 0.70),   # seg2tip_chord / seg2root_chord
-    "seg1_span":      (0.50, 0.90),
+    "y_rotation":     (0.0, 3.0),
+    "seg1root_chord": (1.2, 2.0),
+    "seg1_taper":     (0.30, 0.60),   # break chord / root chord
+    "seg2_taper":     (0.15, 0.50),   # tip chord / break chord
+    "seg1_span":      (0.20, 0.40),
     "seg1_sweep":     (65.0, 78.0),
-    "seg2_span":      (0.70, 1.10),
+    "seg1_twist":     (-2.0, 0.0),
+    "seg2_span":     (0.35, 0.65),
     "seg2_sweep":     (40.0, 60.0),
     "seg2_twist":     (-4.0, 0.0),
     "tc_root":        (0.020, 0.040),
@@ -40,9 +42,6 @@ VARIABLES = {
 # constant UAV parameters
 FIXED = dict(
     x_location=0.0,
-    z_location=0.08,
-    y_rotation=1.5,
-    seg1_twist=0.0,
     seg1_dihedral=0.0,
     seg2_dihedral=0.0,
     wing_tess_w=101,
@@ -53,10 +52,7 @@ FIXED = dict(
 def resolve(row):
     p = dict(FIXED)
     for name in VARIABLES:
-        if not name.startswith("taper_"):
-            p[name] = float(row[name])
-    p["seg2root_chord"] = p["seg1root_chord"] * float(row["taper_break"])
-    p["seg2tip_chord"]  = p["seg2root_chord"] * float(row["taper_tip"])
+        p[name] = float(row[name])
     return p
 
 def case_dir(design_id):

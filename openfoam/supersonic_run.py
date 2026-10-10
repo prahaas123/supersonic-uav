@@ -27,18 +27,17 @@ SYMMETRY      = 2.0 if HALF_MODEL else 1.0
 UAV_PARAMS = dict(
     # Wing placement
     x_location=0.0,
-    z_location=0.08,
     y_rotation=1.5,
     # Segment 1 (root to break)
-    seg1root_chord=4.0,
-    seg2root_chord=1.6,  # break chord
-    seg1_span=0.75,
-    seg1_sweep=73.0,
-    seg1_twist=0.0,
+    seg1root_chord=1.6,
+    seg1_taper=0.5,
+    seg1_span=0.3,
+    seg1_sweep=70.0,
+    seg1_twist=-0.75,
     seg1_dihedral=0.0,
     # Segment 2 (break to tip)
-    seg2tip_chord=0.8,
-    seg2_span=1.0,
+    seg2_taper=0.2,
+    seg2_span=0.5,
     seg2_sweep=48.0,
     seg2_twist=-2.5,
     seg2_dihedral=0.0,
