@@ -67,9 +67,9 @@ MACH_RANGE = [1.25, 1.75]
 # Isosurface values
 MACH_ISO = [1.45, 1.55]   # shock compression / expansion surfaces
 MACH_BOX = {"position": [-0.5, -3.0, -2.0], "length": [7.5, 6.0, 4.0]}
-Q_ISO = 1.0e7       # Q-criterion threshold [1/s^2]; 1e6 is mostly boundary-layer noise
-# Box around the UAV for the Q-criterion gradient
-Q_BOX = {"position": [-0.5, 0.0, -0.5], "length": [3.5, 1.2, 1.0]}
+VORT_ISO = [100.0, 1000.0, 10000.0]   # Vorticity magnitude isovalues [1/s], nested shells
+# Box around the UAV for the vorticity gradient
+VORT_BOX = {"position": [-0.5, 0.0, -0.5], "length": [3.5, 1.2, 1.0]}
 
 # Validate inputs
 if len(sys.argv) < 3:
@@ -286,35 +286,47 @@ def mach_isosurface():
     save_all_views(renderView, "iso-mach", VIEWS_3D, FOCAL_POINT)
     ResetSession()
 
-def q_criterion():
+def vorticity_isosurface():
     reader = OpenDataFile(input_filepath)
     latest_time = get_latest_time(reader)
-    reader.CellArrays = ["U", "Ma"]
+    reader.CellArrays = ["U"]
     renderView = CreateView("RenderView")
     renderView.ViewSize = VIEW_SIZE_STANDARD
     renderView.ViewTime = latest_time
     box = Clip(Input=reader)
     box.ClipType = "Box"
-    box.ClipType.Position = Q_BOX["position"]
-    box.ClipType.Length = Q_BOX["length"]
+    box.ClipType.Position = VORT_BOX["position"]
+    box.ClipType.Length = VORT_BOX["length"]
     box.Crinkleclip = 1
+    # Cell-based gradient, the point-based one fails on degenerate snappy cells (NaN / 1e9 spikes)
     gradient = Gradient(Input=box)
-    gradient.ScalarArray = ["POINTS", "U"]
+    gradient.ScalarArray = ["CELLS", "U"]
     gradient.ComputeGradient = 0
-    gradient.ComputeQCriterion = 1
-    gradient.QCriterionArrayName = "Q"
-    contour = Contour(Input=gradient)
-    contour.ContourBy = ["POINTS", "Q"]
-    contour.Isosurfaces = [Q_ISO]
+    gradient.ComputeVorticity = 1
+    gradient.VorticityArrayName = "Vorticity"
+    vort_mag = Calculator(Input=gradient)
+    vort_mag.AttributeType = "Cell Data"
+    vort_mag.ResultArrayName = "VorticityMag"
+    vort_mag.Function = "mag(Vorticity)"
+    points = CellDatatoPointData(Input=vort_mag)
+    contour = Contour(Input=points)
+    contour.ContourBy = ["POINTS", "VorticityMag"]
+    contour.Isosurfaces = VORT_ISO
     contour.ComputeScalars = 1
     contour.UpdatePipeline(latest_time)
     show_body(latest_time, renderView)
     display1 = Show(reflect(contour, latest_time), renderView)
-    ColorBy(display1, ("CELLS", "Ma"))
-    maLUT = GetColorTransferFunction("Ma")
-    maLUT.RescaleTransferFunction(*MACH_RANGE)
-    show_scalar_bar(display1, renderView, "Ma", "Mach")
-    save_all_views(renderView, "iso-qcriterion")
+    ColorBy(display1, ("POINTS", "VorticityMag"))
+    vortLUT = GetColorTransferFunction("VorticityMag")
+    vortLUT.RescaleTransferFunction(VORT_ISO[0], VORT_ISO[-1])
+    # Spread the colour points evenly in log space, otherwise the low decades all map to one colour
+    vortLUT.MapControlPointsToLogSpace()
+    vortLUT.UseLogScale = 1
+    bar = show_scalar_bar(display1, renderView, "VorticityMag", "Vorticity magnitude [1/s]")
+    # Log-spaced labels, the default linear ones bunch at the top of a log bar
+    bar.CustomLabels = [300.0, 1000.0, 3000.0]
+    display1.Opacity = 0.4
+    save_all_views(renderView, "iso-vorticity")
     ResetSession()
 
 def wall_shear():
@@ -499,7 +511,7 @@ if __name__ == "__main__":
     pressure_slice()
     mach_slices()
     mach_isosurface()
-    q_criterion()
+    vorticity_isosurface()
     wall_shear()
     yplus()
     print_and_plot_stats()
