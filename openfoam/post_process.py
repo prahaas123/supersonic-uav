@@ -14,19 +14,39 @@ FOCAL_POINT = [1.4, 0.0, 0.0]
 VIEW_SIZE_HIRES = [3840, 2160]
 VIEW_SIZE_STANDARD = [3840, 2160]
 
+# Wide views, used for the Mach isosurfaces which reach well beyond the aircraft
 VIEWS_3D = {
     "diagonal": {"position": [-5.13, -4.81, 3.09], "view_up": [0.24, 0.27, 0.93]},
     "bottom":    {"position": [1.4, 0.0, -8.56],  "view_up": [0, 1, 0]},
     "top":      {"position": [1.4, 0.0, 10.36],   "view_up": [0, 1, 0]}
 }
 
-VIEW_2D_SLICE = {
+# Close views of the aircraft itself (fuselage x -0.25 to 2.05, semi-span 0.8)
+FOCAL_POINT_CLOSE = [0.95, 0.0, 0.0]
+VIEWS_CLOSE = {
+    "diagonal": {"position": [-1.45, -2.25, 1.45], "view_up": [0.24, 0.27, 0.93]},
+    "bottom":   {"position": [0.95, 0.0, -4.0],    "view_up": [0, 1, 0]},
+    "top":      {"position": [0.95, 0.0, 4.0],     "view_up": [0, 1, 0]}
+}
+
+# Wide side view for the mesh image, shows the refinement regions around the aircraft
+VIEW_MESH = {
     "position": [2.5, -12.0, 0.0],
     "focal_point": [2.5, 0.0, 0.0],
+    "view_up": [0, 0, 1],
+}
+
+VIEW_2D_SLICE = {
+    "position": [1.0, -5.0, 0.0],
+    "focal_point": [1.0, 0.0, 0.0],
     "view_up": [0, 0, 1],
     "slice-origin": [0.0, 0.01, 0.0],
     "slice-normal": [0, 1, 0]
 }
+
+# Colour bar filling the right-hand side of the image
+SCALAR_BAR = {"position": [0.90, 0.05], "length": 0.90, "thickness": 64,
+              "title_size": 56, "label_size": 44, "n_labels": 6}
 
 # Freestream for Cp: fixed Mach 1.5 at 15,000 m ISA
 MACH_INF = 1.5
@@ -36,11 +56,12 @@ CP_RANGE = [-0.4, 1.0]
 
 # Cross-flow Mach slices (x-normal)
 MACH_STATIONS = {
-    "forebody": 1.0,   # nose / strake
-    "kink":     2.5,   # wing leading-edge kink
-    "midwing":  3.6,   # outer wing, near tip leading edge
-    "wake":     5.5,   # 0.75 m behind the tail
+    "forebody": 0.4,   # inboard wing, ahead of the break (break LE at x = 0.82)
+    "kink":     1.0,   # just behind the leading-edge break
+    "midwing":  1.45,  # outer wing, between tip LE (1.38) and tip TE (1.54)
+    "wake":     2.5,   # 0.45 m behind the tail (x = 2.05)
 }
+MACH_SLICE_SCALE = 0.75    # parallel-projection half height [m]
 MACH_RANGE = [1.25, 1.75]
 
 # Isosurface values
@@ -48,7 +69,7 @@ MACH_ISO = [1.45, 1.55]   # shock compression / expansion surfaces
 MACH_BOX = {"position": [-0.5, -3.0, -2.0], "length": [7.5, 6.0, 4.0]}
 Q_ISO = 1.0e7       # Q-criterion threshold [1/s^2]; 1e6 is mostly boundary-layer noise
 # Box around the UAV for the Q-criterion gradient
-Q_BOX = {"position": [-0.5, -2.5, -1.0], "length": [6.5, 5.0, 2.0]}
+Q_BOX = {"position": [-0.5, 0.0, -0.5], "length": [3.5, 1.2, 1.0]}
 
 # Validate inputs
 if len(sys.argv) < 3:
@@ -66,8 +87,6 @@ def get_latest_time(reader):
     return times[-1] if len(times) > 0 else 0.0
 
 def reflect(source, time):
-    # Half model: mirror across the y=0 symmetry plane so images show both sides.
-    # Full models (e.g. subsonic) already extend below y=0, so leave them alone.
     source.UpdatePipeline(time)
     if source.GetDataInformation().GetBounds()[2] < -1e-6:
         return source
@@ -78,10 +97,35 @@ def reflect(source, time):
     reflected.UpdatePipeline(time)
     return reflected
 
-def save_all_views(renderView, prefix):
-    for view_name, cam in VIEWS_3D.items():
+def show_scalar_bar(display, renderView, array_name, title=None):
+    # Call after the LUT has been rescaled, the labels are spread over its final range
+    display.SetScalarBarVisibility(renderView, True)
+    lut = GetColorTransferFunction(array_name)
+    bar = GetScalarBar(lut, renderView)
+    bar.WindowLocation = "Any Location"
+    bar.Orientation = "Vertical"
+    bar.Position = SCALAR_BAR["position"]
+    bar.ScalarBarLength = SCALAR_BAR["length"]
+    bar.ScalarBarThickness = SCALAR_BAR["thickness"]
+    bar.TitleFontSize = SCALAR_BAR["title_size"]
+    bar.LabelFontSize = SCALAR_BAR["label_size"]
+    bar.TitleBold = 1
+    # A fixed number of evenly spaced labels, the automatic ones crowd a full-height bar
+    lo, hi = lut.RGBPoints[0], lut.RGBPoints[-4]
+    n = SCALAR_BAR["n_labels"]
+    bar.UseCustomLabels = 1
+    bar.CustomLabels = [lo + (hi - lo) * i / (n - 1) for i in range(1, n - 1)]
+    bar.AutomaticLabelFormat = 1
+    bar.RangeLabelFormat = "%-#.3g"
+    if title:
+        bar.Title = title
+        bar.ComponentTitle = ""
+    return bar
+
+def save_all_views(renderView, prefix, views=VIEWS_CLOSE, focal_point=FOCAL_POINT_CLOSE):
+    for view_name, cam in views.items():
         renderView.CameraPosition = cam["position"]
-        renderView.CameraFocalPoint = FOCAL_POINT
+        renderView.CameraFocalPoint = focal_point
         renderView.CameraViewUp = cam["view_up"]
         Render()
         SaveScreenshot(f"{job_directory}/{prefix}-{view_name}.png", renderView, ImageResolution=renderView.ViewSize)
@@ -106,13 +150,13 @@ def mesh():
     renderView = CreateView("RenderView")
     renderView.ViewSize = VIEW_SIZE_STANDARD
     renderView.ViewTime = latest_time
-    renderView.CameraPosition = VIEW_2D_SLICE["position"]
-    renderView.CameraFocalPoint = VIEW_2D_SLICE["focal_point"]
-    renderView.CameraViewUp = VIEW_2D_SLICE["view_up"]
+    renderView.CameraPosition = VIEW_MESH["position"]
+    renderView.CameraFocalPoint = VIEW_MESH["focal_point"]
+    renderView.CameraViewUp = VIEW_MESH["view_up"]
     renderView.OrientationAxesVisibility = 0
     slice = Slice(Input=reflect(reader1, latest_time))
     slice.SliceType = "Plane"
-    slice.SliceType.Origin = [0.4, 0.6, 0.25]
+    slice.SliceType.Origin = [0.4, 0.15, 0.0]   # through wing segment 1
     slice.SliceType.Normal = [0, 1, 0]
     slice.UpdatePipeline(latest_time)
     display1 = Show(slice, renderView)
@@ -149,7 +193,7 @@ def cp_countour():
     ColorBy(display1, ("CELLS", "Cp"))
     HideScalarBarIfNotNeeded(pLUT, renderView)
     cpLUT.RescaleTransferFunction(*CP_RANGE)
-    display1.SetScalarBarVisibility(renderView, True)
+    show_scalar_bar(display1, renderView, "Cp")
     save_all_views(renderView, "cp-contour")
     ResetSession()
     
@@ -172,7 +216,7 @@ def pressure_slice():
     display1 = Show(slice, renderView)
     ColorBy(display1, ("CELLS", "p", "Magnitude"))
     display1.RescaleTransferFunctionToDataRange(True, False)
-    display1.SetScalarBarVisibility(renderView, True)
+    show_scalar_bar(display1, renderView, "p", "p [Pa]")
     Render()
     SaveScreenshot(f"{job_directory}/slice-pressure.png", renderView, ImageResolution=renderView.ViewSize)
     ResetSession()
@@ -190,7 +234,7 @@ def mach_slices():
         renderView.CameraFocalPoint = [x, 0.0, 0.0]
         renderView.CameraViewUp = [0, 0, 1]
         renderView.CameraParallelProjection = 1
-        renderView.CameraParallelScale = 2.0
+        renderView.CameraParallelScale = MACH_SLICE_SCALE
         slice = Slice(Input=reflected)
         slice.SliceType = "Plane"
         slice.SliceType.Origin = [x, 0.0, 0.0]
@@ -200,7 +244,7 @@ def mach_slices():
         ColorBy(display1, ("CELLS", "Ma"))
         maLUT = GetColorTransferFunction("Ma")
         maLUT.RescaleTransferFunction(*MACH_RANGE)
-        display1.SetScalarBarVisibility(renderView, True)
+        show_scalar_bar(display1, renderView, "Ma", "Mach")
         Render()
         SaveScreenshot(f"{job_directory}/slice-mach-{name}.png", renderView, ImageResolution=renderView.ViewSize)
         Delete(slice)
@@ -237,9 +281,9 @@ def mach_isosurface():
     ColorBy(display1, ("POINTS", "Ma"))
     maLUT = GetColorTransferFunction("Ma")
     maLUT.RescaleTransferFunction(*MACH_ISO)
-    display1.SetScalarBarVisibility(renderView, True)
+    show_scalar_bar(display1, renderView, "Ma", "Mach")
     display1.Opacity = 0.4
-    save_all_views(renderView, "iso-mach")
+    save_all_views(renderView, "iso-mach", VIEWS_3D, FOCAL_POINT)
     ResetSession()
 
 def q_criterion():
@@ -249,7 +293,6 @@ def q_criterion():
     renderView = CreateView("RenderView")
     renderView.ViewSize = VIEW_SIZE_STANDARD
     renderView.ViewTime = latest_time
-    # Q is a scalar, so compute it on the half model and reflect the isosurface
     box = Clip(Input=reader)
     box.ClipType = "Box"
     box.ClipType.Position = Q_BOX["position"]
@@ -267,10 +310,10 @@ def q_criterion():
     contour.UpdatePipeline(latest_time)
     show_body(latest_time, renderView)
     display1 = Show(reflect(contour, latest_time), renderView)
-    ColorBy(display1, ("POINTS", "Ma"))
+    ColorBy(display1, ("CELLS", "Ma"))
     maLUT = GetColorTransferFunction("Ma")
     maLUT.RescaleTransferFunction(*MACH_RANGE)
-    display1.SetScalarBarVisibility(renderView, True)
+    show_scalar_bar(display1, renderView, "Ma", "Mach")
     save_all_views(renderView, "iso-qcriterion")
     ResetSession()
 
@@ -288,7 +331,7 @@ def wall_shear():
     UpdateScalarBarsComponentTitle(wallShearStressLUT, display1)
     ColorBy(display1, ("CELLS", "wallShearStress", "X"))
     display1.RescaleTransferFunctionToDataRange(True, False)
-    display1.SetScalarBarVisibility(renderView, True)
+    show_scalar_bar(display1, renderView, "wallShearStress", "Wall shear stress X")
     save_all_views(renderView, "wall-shear")
     ResetSession()
 
@@ -304,7 +347,7 @@ def yplus():
     ColorBy(display1, ("CELLS", "yPlus"))
     yPlusLUT = GetColorTransferFunction("yPlus")
     yPlusLUT.RescaleTransferFunction(30.0, 300.0)
-    display1.SetScalarBarVisibility(renderView, True)
+    show_scalar_bar(display1, renderView, "yPlus", "y+")
     save_all_views(renderView, "yplus")
     ResetSession()
     
@@ -318,14 +361,12 @@ def print_and_plot_stats():
 
     m = extract_metrics(base_case_dir)
 
-    # Keep timings written by supersonic_run.py
+    # Keep extra values written by supersonic_run.py (reference values, timings)
     metrics_path = os.path.join(base_case_dir, "metrics.json")
     try:
         with open(metrics_path) as fh:
             prev = json.load(fh)
-        for key in ("mesh_time_s", "solve_time_s", "total_time_s"):
-            if key in prev:
-                m[key] = prev[key]
+        m = {**prev, **m}
     except (OSError, ValueError):
         pass
 
