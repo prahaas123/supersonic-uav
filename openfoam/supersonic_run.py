@@ -17,7 +17,7 @@ CASE_TEMPLATE = "case_template_supersonic"
 ALTITUDE_M    = 15000.0     # [m]
 MACH          = 1.5
 NP            = 50           # MPI processes
-END_TIME      = 0.03         # [s]
+END_TIME      = 0.02        # [s]
 WRITE_INTERVAL = END_TIME    # [s] fields written only at the final time
 
 HALF_MODEL    = True
