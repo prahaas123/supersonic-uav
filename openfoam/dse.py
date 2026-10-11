@@ -25,13 +25,13 @@ BOX_Y_MAX = 1.6
 VARIABLES = {
     "y_rotation":     (0.0, 3.0),
     "seg1root_chord": (1.2, 2.0),
-    "seg1_taper":     (0.30, 0.60),   # break chord / root chord
-    "seg2_taper":     (0.15, 0.50),   # tip chord / break chord
+    "seg1_taper":     (0.30, 0.70),   # break chord / root chord
+    "seg2_taper":     (0.15, 0.70),   # tip chord / break chord
     "seg1_span":      (0.20, 0.40),
-    "seg1_sweep":     (65.0, 78.0),
+    "seg1_sweep":     (50.0, 75.0),
     "seg1_twist":     (-2.0, 0.0),
-    "seg2_span":     (0.35, 0.65),
-    "seg2_sweep":     (40.0, 60.0),
+    "seg2_span":      (0.35, 0.65),
+    "seg2_sweep":     (50.0, 70.0),
     "seg2_twist":     (-4.0, 0.0),
     "tc_root":        (0.020, 0.040),
     "tc_break":       (0.025, 0.045),
