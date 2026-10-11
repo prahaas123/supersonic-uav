@@ -177,7 +177,7 @@ def prepare(job_directory, atm, u_inf, uav_params):
         cd["endTime"]       = END_TIME
         cd["writeInterval"] = WRITE_INTERVAL
         fc = cd["functions"]["forceCoeffs"]
-        cofr = f"({refs['cofr_x']:.6g} 0 0)"
+        cofr = f"({refs['cg_x']:.6g} 0 0)"
         fc["magUInf"]   = u_inf
         fc["lRef"]      = refs["ref_chord"]
         fc["Aref"]      = refs["ref_area"]

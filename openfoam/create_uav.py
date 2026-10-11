@@ -3,6 +3,7 @@ import os
 import math
 import tempfile
 
+CG_MAC_FRACTION = 0.35   # CG position aft of the MAC leading edge
 FUSELAGE_LENGTH = 2.3
 FUSELAGE_X_LOCATION = -0.246
 WING_Z_LOCATION = 0.05
@@ -30,7 +31,7 @@ def reference_values(p):
     return {
         "ref_area": 2.0 * half_area,
         "ref_chord": mac,
-        "cofr_x": x_mac_le + 0.25 * mac,
+        "cg_x": x_mac_le + CG_MAC_FRACTION * mac,
         "semi_span": (p["seg1_span"] * math.cos(math.radians(p["seg1_dihedral"]))
                       + p["seg2_span"] * math.cos(math.radians(p["seg2_dihedral"]))),
         "tip_te_x": x_le + tip_chord,
