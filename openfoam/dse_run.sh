@@ -4,7 +4,7 @@
 
 #SBATCH --job-name=dse
 #SBATCH --account=def-jphickey
-#SBATCH --time=2-00:00:00
+#SBATCH --time=06:00:00
 #SBATCH --nodes=1
 #SBATCH --ntasks-per-node=50
 #SBATCH --cpus-per-task=1
