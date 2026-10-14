@@ -1,6 +1,7 @@
 # python3 dse.py generate          write dse/designs.csv (Latin hypercube samples)
 # python3 dse.py run <design_id>   mesh, solve and extract metrics for one design (one SLURM array task, see dse_run.sh)
 # python3 dse.py collect           collects all images and writes one results csv file
+# python3 dse.py pending           print the SLURM array spec of pending designs: sbatch --array=$(python3 dse.py pending)%10 dse_run.sh
 
 import csv
 import json
@@ -20,6 +21,9 @@ RESULTS_CSV = os.path.join(RESULTS_DIR, "results.csv")
 # shockAndWakeBox in snappyHexMeshDict, designs reaching outside it are flagged at generation
 BOX_X_MAX = 4.2
 BOX_Y_MAX = 1.6
+
+KEEP = ("images", "metrics.json")
+DONE_STATUSES = ("ok", "not_converged")
 
 # Sampled variables: name -> (lower, upper)
 VARIABLES = {
@@ -62,6 +66,36 @@ def read_designs():
     with open(DESIGNS_CSV, newline="") as fh:
         return list(csv.DictReader(fh))
 
+def is_done(design_id):
+    try:
+        with open(os.path.join(case_dir(design_id), "metrics.json")) as fh:
+            return json.load(fh).get("status") in DONE_STATUSES
+    except (OSError, ValueError):
+        return False
+
+def strip_case(design_id):
+    case = case_dir(design_id)
+    if not os.path.isdir(case):
+        return
+    for name in os.listdir(case):
+        if name in KEEP:
+            continue
+        path = os.path.join(case, name)
+        if os.path.isdir(path) and not os.path.islink(path):
+            shutil.rmtree(path, ignore_errors=True)
+        else:
+            os.remove(path)
+
+def array_spec(ids):
+    parts, start = [], None
+    for i, n in enumerate(ids):
+        if start is None:
+            start = n
+        if i + 1 == len(ids) or ids[i + 1] != n + 1:
+            parts.append(str(start) if start == n else f"{start}-{n}")
+            start = None
+    return ",".join(parts)
+
 def generate():
     from scipy.stats import qmc
 
@@ -92,15 +126,30 @@ def generate():
         print(f"  WARNING: {len(outside)} designs extend past shockAndWakeBox: {outside}")
 
 def run(design_id):
+    if is_done(design_id):
+        print(f"design_{design_id:03d} already completed, skipping")
+        return 0
+
     import supersonic_run as sr
 
     row = next(r for r in read_designs() if int(r["design_id"]) == design_id)
     atm = sr.isa_atmosphere(sr.ALTITUDE_M)
     u_inf = sr.MACH * atm["a"]
-    results = sr.design_point(atm, u_inf, resolve(row), case_dir(design_id))
+    try:
+        results = sr.design_point(atm, u_inf, resolve(row), case_dir(design_id))
+    finally:
+        strip_case(design_id)
     if results is None:
         return 1
     return 0 if results.get("converged") else 2
+
+def pending():
+    ids = [int(d["design_id"]) for d in read_designs() if not is_done(d["design_id"])]
+    if not ids:
+        print("All designs completed", file=sys.stderr)
+        return
+    print(f"{len(ids)} designs pending", file=sys.stderr)
+    print(array_spec(ids))
 
 def collect():
     designs = read_designs()
@@ -142,12 +191,14 @@ def collect():
     print(f"Copied images for {n_images} designs to {os.path.join(RESULTS_DIR, 'images')}")
 
 if __name__ == "__main__":
-    if len(sys.argv) < 2 or sys.argv[1] not in ("generate", "run", "collect"):
-        print("usage: python3 dse.py generate | run <design_id> | collect")
+    if len(sys.argv) < 2 or sys.argv[1] not in ("generate", "run", "collect", "pending"):
+        print("usage: python3 dse.py generate | run <design_id> | collect | pending")
         sys.exit(1)
     if sys.argv[1] == "generate":
         generate()
     elif sys.argv[1] == "run":
         sys.exit(run(int(sys.argv[2])))
+    elif sys.argv[1] == "pending":
+        pending()
     else:
         collect()
