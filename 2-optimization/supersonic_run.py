@@ -10,6 +10,9 @@ from PyFoam.RunDictionary.SolutionDirectory import SolutionDirectory
 from PyFoam.RunDictionary.ParsedParameterFile import ParsedParameterFile
 from PyFoam.Execution.BasicRunner import BasicRunner
 
+TOOLS_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "0-tools")
+sys.path.insert(0, TOOLS_DIR)
+
 import metrics
 from create_uav import create_uav_model, reference_values
 
@@ -257,7 +260,7 @@ def _is_float(s):
 
 def post_process(job_directory):
     job_id = os.path.basename(os.path.normpath(job_directory))
-    command = f"LIBGL_ALWAYS_SOFTWARE=1 pvbatch --force-offscreen-rendering post_process.py {job_directory}/{job_id}.foam {job_directory}/images"
+    command = f"LIBGL_ALWAYS_SOFTWARE=1 pvbatch --force-offscreen-rendering {os.path.join(TOOLS_DIR, 'post_process.py')} {job_directory}/{job_id}.foam {job_directory}/images"
     try:        
         result = subprocess.run(command, shell=True, capture_output=True, text=True, executable='/bin/bash')
         if result.returncode != 0:

@@ -76,7 +76,6 @@ def main():
         print(f"Successfully completed {job_id}!")
         
 def initialize_results_csv():
-    """Deletes old results.csv if it exists and initializes a fresh one with headers."""
     csv_file_path = "results.csv"
     if os.path.exists(csv_file_path):
         os.remove(csv_file_path)
@@ -175,7 +174,7 @@ def solve(job_directory, processors_per_job, num_iterations):
 def postprocess(job_directory, job_id):
     os.makedirs(f"{job_directory}/images", exist_ok=True)
     command = (
-        f"LIBGL_ALWAYS_SOFTWARE=1 pvbatch --force-offscreen-rendering post_process.py {job_directory}/{job_id}.foam {job_directory}/images"
+        f"LIBGL_ALWAYS_SOFTWARE=1 pvbatch --force-offscreen-rendering ../0-tools/post_process.py {job_directory}/{job_id}.foam {job_directory}/images"
     )
     result = subprocess.run(command, shell=True, capture_output=True, text=True)
     
