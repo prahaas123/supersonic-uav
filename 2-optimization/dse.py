@@ -9,6 +9,7 @@ import os
 import shutil
 import sys
 
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "0-tools"))
 from create_uav import reference_values
 
 N_SAMPLES   = 512
