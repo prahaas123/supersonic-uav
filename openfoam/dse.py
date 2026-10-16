@@ -141,7 +141,18 @@ def run(design_id):
         strip_case(design_id)
     if results is None:
         return 1
-    return 0 if results.get("converged") else 2
+    if not results.get("converged"):
+        return 2
+    remove_log(design_id)
+    return 0
+
+def remove_log(design_id):
+    if os.environ.get("SLURM_ARRAY_TASK_ID") != str(design_id):
+        return
+    try:
+        os.remove(os.path.join(DSE_DIR, "logs", f"design_{design_id}.log"))
+    except OSError:
+        pass
 
 def pending():
     ids = [int(d["design_id"]) for d in read_designs() if not is_done(d["design_id"])]
