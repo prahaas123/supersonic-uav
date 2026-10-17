@@ -1,10 +1,3 @@
-# python3 surrogate.py [csv]   fit GP surrogates on the DSE results, 5-fold cross-validate, save models
-#                              (default csv: 0-images/dse_results.csv)
-#
-# Outputs (next to the csv):
-#   surrogates.joblib    fitted models, load with load_models() and evaluate with predict()
-#   surrogate_cv.png     cross-validated predictions vs CFD
-
 import csv
 import os
 import sys
@@ -24,7 +17,7 @@ from sklearn.preprocessing import PolynomialFeatures
 from dse import SEED, VARIABLES
 
 HERE = os.path.dirname(os.path.abspath(__file__))
-RESULTS_CSV = os.path.join(HERE, "..", "0-images", "dse_results.csv")
+RESULTS_CSV = os.path.join(HERE, "..", "0-results", "dse_results.csv")
 
 TARGETS = {
     "lift_N":      "Lift [N]",
