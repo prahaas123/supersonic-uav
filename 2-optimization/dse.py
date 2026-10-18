@@ -2,6 +2,7 @@
 # python3 dse.py run <design_id>   mesh, solve and extract metrics for one design (one SLURM array task, see dse_run.sh)
 # python3 dse.py collect           collects all images and writes one results csv file
 # python3 dse.py pending           print the SLURM array spec of pending designs: sbatch --array=$(python3 dse.py pending)%10 dse_run.sh
+# python3 dse.py add <csv>         append designs (e.g. candidates.csv from optimize.py) to dse/designs.csv
 
 import csv
 import json
@@ -10,7 +11,7 @@ import shutil
 import sys
 
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "0-tools"))
-from create_uav import reference_values
+from create_uav import CG_MAC_FRACTION, reference_values
 
 N_SAMPLES   = 512
 SEED        = 42
@@ -163,6 +164,20 @@ def pending():
     print(f"{len(ids)} designs pending", file=sys.stderr)
     print(array_spec(ids))
 
+def add(path):
+    designs = read_designs()
+    with open(path, newline="") as fh:
+        new = [{"design_id": int(r["design_id"]), **{n: r[n] for n in VARIABLES}}
+               for r in csv.DictReader(fh)]
+    clash = sorted({int(d["design_id"]) for d in designs} & {r["design_id"] for r in new})
+    if clash:
+        print(f"Nothing added, design IDs already in {DESIGNS_CSV}: {clash}")
+        return 1
+    with open(DESIGNS_CSV, "a", newline="") as fh:
+        csv.DictWriter(fh, fieldnames=list(designs[0])).writerows(new)
+    print(f"Added designs {array_spec(sorted(r['design_id'] for r in new))} to {DESIGNS_CSV}")
+    return 0
+
 def collect():
     designs = read_designs()
     os.makedirs(RESULTS_DIR, exist_ok=True)
@@ -203,8 +218,8 @@ def collect():
     print(f"Copied images for {n_images} designs to {os.path.join(RESULTS_DIR, 'images')}")
 
 if __name__ == "__main__":
-    if len(sys.argv) < 2 or sys.argv[1] not in ("generate", "run", "collect", "pending"):
-        print("usage: python3 dse.py generate | run <design_id> | collect | pending")
+    if len(sys.argv) < 2 or sys.argv[1] not in ("generate", "run", "collect", "pending", "add"):
+        print("usage: python3 dse.py generate | run <design_id> | collect | pending | add <csv>")
         sys.exit(1)
     if sys.argv[1] == "generate":
         generate()
@@ -212,5 +227,7 @@ if __name__ == "__main__":
         sys.exit(run(int(sys.argv[2])))
     elif sys.argv[1] == "pending":
         pending()
+    elif sys.argv[1] == "add":
+        sys.exit(add(sys.argv[2]))
     else:
         collect()
