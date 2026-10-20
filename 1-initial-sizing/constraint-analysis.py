@@ -5,7 +5,7 @@ from matplotlib.widgets import Slider, Button
 from matplotlib.lines import Line2D
 
 G = 9.80665
-S_REF = 0.60        # m^2, reference area the CFD Cd is normalised on
+S_REF = 1.20        # m^2, reference area the CFD Cd is normalised on (full wing, design_baseline)
 K_SUB = 0.15        # subsonic induced-drag factor, 1/(pi*AR*e)
 BETA_FLOOR = 0.4583 # beta at M = 1.10; linear theory is invalid closer to M = 1
 M_DD, M_PEAK = 0.95, 1.10
@@ -126,12 +126,12 @@ def get_style(label):
     return {"color": "#666666", "ls": "-", "lw": 1.5}
 
 DEFAULTS = dict(
-    MTOW      = 18.7,     # kg   -- target, drawn as a line only
-    T_ref     = 344.0,    # N    -- thrust at the cruise condition
+    MTOW      = 20.0,     # kg   -- target, drawn as a line only
+    T_ref     = 343.0,    # N    -- thrust at the cruise condition
     alt_cr    = 15000,    # m    -- matches the CFD design point
     mach      = 1.50,
-    cd_ref    = 0.11628,  # measured: 1331.15 N / (19080 Pa * 0.60 m^2)
-    cd0_sub   = 0.012,
+    cd_ref    = 0.01278,  # design_baseline: 290.85 N / (18971 Pa * 1.20 m^2)
+    cd0_sub   = 0.0053,   # design_baseline viscous drag only: 121.27 N / (18971 Pa * 1.20 m^2)
     wing_share= 0.40,     # fraction of zero-lift drag that scales with wing area
     wave_n    = 1.00,     # transonic pinch severity; n=1 gives a 2.4x peak
     suction   = 0.00,     # 0 = supersonic LE (K = beta/4), 0.6 = subsonic LE
@@ -165,7 +165,7 @@ for sp in panel_bg.spines.values():
 
 SLIDERS_DEF = [
     ("Target MTOW [kg]",    "MTOW",      2,     60,     0.1,   ),
-    ("Thrust @ cruise [N]", "T_ref",     50,    4000,   10,    ),
+    ("Thrust @ cruise [N]", "T_ref",     50,    4000,   1,     ),
     ("Cruise Alt [m]",      "alt_cr",    5000,  25000,  500,   ),
     ("Cruise Mach",         "mach",      1.05,  2.50,   0.05,  ),
     ("CD @ cruise (CFD)",   "cd_ref",    0.005, 0.150,  0.001, ),
