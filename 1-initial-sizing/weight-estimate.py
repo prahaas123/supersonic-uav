@@ -3,7 +3,7 @@ import matplotlib.pyplot as plt
 from matplotlib.widgets import Slider
 
 # Inputs
-MTOW = 18.7              # Maximum Takeoff Weight (kg)
+MTOW = 20.0              # Maximum Takeoff Weight (kg)
 ENGINE_WEIGHT = 4.38     # Engine weight (kg)
 FUEL_FLOW = 0.00615      # Fuel flow rate (kg/s)
 U_CRUISE = 442.6         # Cruise speed (m/s) -- M 1.5 at 15,000 m
