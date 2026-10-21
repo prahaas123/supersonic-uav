@@ -6,4 +6,4 @@ design_*/
 *.log
 archive
 *.vsp3
-_pycache_
+*pycache*
