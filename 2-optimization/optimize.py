@@ -20,6 +20,7 @@ CG_MAX_MAC    = 0.45                   # i.e. where the CG can be placed, update
 THRUST_N      = 343.75
 THRUST_MARGIN = 0.8
 DRAG_MAX_N    = THRUST_MARGIN * THRUST_N   # drag <= available thrust with margin
+TE_SWEEP_MAX  = 35.0                   # [deg] |trailing-edge sweep| limit on each segment
 
 N_SIGMA   = 2.0      # constraints must hold at mean -/+ N_SIGMA std, guards against surrogate error
 N_DESIGNS = 5        # designs proposed per round
@@ -38,14 +39,26 @@ def read_csv(path):
 def trim_cg(lift, moment, mac):
     return dse.CG_MAC_FRACTION - moment / (np.maximum(lift, 1.0) * mac)
 
-def is_feasible(lift, drag, moment, mac):
+def is_feasible(lift, drag, moment, mac, te):
     return (lift >= LIFT_MIN_N and CG_MIN_MAC <= trim_cg(lift, moment, mac) <= CG_MAX_MAC
-            and drag <= DRAG_MAX_N)
+            and drag <= DRAG_MAX_N and all(abs(s) <= TE_SWEEP_MAX for s in te))
+
+def te_sweeps(p):
+    c_root = p["seg1root_chord"]
+    c_break = c_root * p["seg1_taper"]
+    c_tip = c_break * p["seg2_taper"]
+    sweeps = []
+    for c_r, c_t, span, sweep, dihedral in ((c_root, c_break, p["seg1_span"], p["seg1_sweep"], p["seg1_dihedral"]),
+                                            (c_break, c_tip, p["seg2_span"], p["seg2_sweep"], p["seg2_dihedral"])):
+        b = span * np.cos(np.radians(dihedral))     # projected span
+        sweeps.append(np.degrees(np.arctan((b * np.tan(np.radians(sweep)) + c_t - c_r) / b)))
+    return sweeps
 
 def geometry(u):
     p = dict(dse.FIXED, **dict(zip(NAMES, LOWER + u * (UPPER - LOWER))))
     ref = dse.reference_values(p)
     box = max(ref["tip_te_x"] - dse.BOX_X_MAX, 0.0) + max(ref["semi_span"] - dse.BOX_Y_MAX, 0.0)
+    box += sum(max(abs(s) - TE_SWEEP_MAX, 0.0) for s in te_sweeps(p)) / TE_SWEEP_MAX
     return ref["ref_chord"], box
 
 def predict(models, U):
@@ -105,7 +118,8 @@ def check_previous(results):
               + ("  FEASIBLE" if row_feasible(r) else ""))
 
 def row_feasible(r):
-    return is_feasible(float(r["lift_N"]), float(r["drag_N"]), float(r["cm_pitch_Nm"]), float(r["ref_chord"]))
+    te = te_sweeps(dict(dse.FIXED, **{n: float(r[n]) for n in NAMES}))
+    return is_feasible(float(r["lift_N"]), float(r["drag_N"]), float(r["cm_pitch_Nm"]), float(r["ref_chord"]), te)
 
 def best_feasible(results):
     feas = [r for r in results if r.get("status") == "ok" and row_feasible(r)]
