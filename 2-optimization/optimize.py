@@ -13,7 +13,7 @@ import dse
 from surrogate import HERE, LOWER, NAMES, RESULTS_CSV, TARGETS, UPPER, load_models
 
 # Design targets (estimates, update after the sizing redo)
-MASS_KG       = 18.7
+MASS_KG       = 20.0
 LIFT_MIN_N    = MASS_KG * 9.81         # lift >= weight
 CG_MIN_MAC    = 0.25                   # trim CG must lie in this band (fraction of MAC from its LE),
 CG_MAX_MAC    = 0.45                   # i.e. where the CG can be placed, update after component placement
