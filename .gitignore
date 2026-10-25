@@ -1,5 +1,4 @@
-/Background.MD
-*.txt
+notes.md
 .vscode
 run_*
 design_*/
