@@ -1,0 +1,43 @@
+/*--------------------------------*- C++ -*----------------------------------*\
+| =========                 |                                                 |
+| \\      /  F ield         | OpenFOAM: The Open Source CFD Toolbox           |
+|  \\    /   O peration     | Version: v2312                                  |
+|   \\  /    A nd           | Web: www.openfoam.com                           |
+|    \\/     M anipulation  |                                                 |
+\*---------------------------------------------------------------------------*/
+FoamFile
+{
+    version     2.0;
+    format      ascii;
+    class       dictionary;
+    object      blockMeshDict;
+}
+
+scale 1;
+
+vertices
+(
+    // Full span (Y = -10 to +10), no symmetry plane
+    // Bottom face (Z = -10)
+    (-3.333333 -10 -10)   //  0
+    ( 20       -10 -10)   //  1
+    ( 20        10 -10)   //  2
+    (-3.333333  10 -10)   //  3
+    // Top face (Z = +10)
+    (-3.333333 -10  10)   //  4
+    ( 20       -10  10)   //  5
+    ( 20        10  10)   //  6
+    (-3.333333  10  10)   //  7
+);
+
+blocks
+(
+    hex (0 1 2 3 4 5 6 7) (42 36 36) simpleGrading (1 1 1)
+);
+
+boundary
+(
+    inlet    { type patch;    faces ((0 4 7 3)); }
+    outlet   { type patch;    faces ((1 2 6 5)); }
+    farfield { type patch;    faces ((3 7 6 2) (0 1 5 4) (0 3 2 1) (4 5 6 7)); }
+);

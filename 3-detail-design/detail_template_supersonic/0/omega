@@ -1,0 +1,46 @@
+/*--------------------------------*- C++ -*----------------------------------*\
+| =========                 |                                                 |
+| \\      /  F ield         | OpenFOAM: The Open Source CFD Toolbox           |
+|  \\    /   O peration     | Version: v2312                                  |
+|   \\  /    A nd           | Web: www.openfoam.com                           |
+|    \\/     M anipulation  |                                                 |
+\*---------------------------------------------------------------------------*/
+FoamFile
+{
+    version     2.0;
+    format      ascii;
+    class       volScalarField;
+    object      omega;
+}
+// ============================================================================
+
+#include        "include/freeStreamVars"
+dimensions      [0 0 -1 0 0 0 0];
+internalField   uniform $omegaInf;
+
+boundaryField
+{
+    inlet
+    {
+        type            fixedValue;
+        value           uniform $omegaInf;
+    }
+
+    outlet
+    {
+        type            zeroGradient;
+    }
+
+    farfield
+    {
+        type            freestream;
+        freestreamValue uniform $omegaInf;
+    }
+
+    uav
+    {
+        // Blends viscous-sublayer and log-law omega, valid at y+ ~ 1
+        type            omegaWallFunction;
+        value           uniform $omegaInf;
+    }
+}
