@@ -1,0 +1,2 @@
+// Default: adiabatic wall. Overwritten by supersonic_detail_run.py (WALL_TEMPERATURE)
+type            zeroGradient;

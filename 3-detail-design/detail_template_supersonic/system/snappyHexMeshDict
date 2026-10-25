@@ -1,0 +1,149 @@
+/*--------------------------------*- C++ -*----------------------------------*\
+| =========                 |                                                 |
+| \\      /  F ield         | OpenFOAM: The Open Source CFD Toolbox           |
+|  \\    /   O peration     | Version: v2312                                  |
+|   \\  /    A nd           | Web: www.openfoam.com                           |
+|    \\/     M anipulation  |                                                 |
+\*---------------------------------------------------------------------------*/
+FoamFile
+{
+    version     2.0;
+    format      ascii;
+    class       dictionary;
+    object      snappyHexMeshDict;
+}
+// ============================================================================
+
+castellatedMesh true;
+snap            true;
+addLayers       true;
+
+mergeTolerance 1e-6;
+
+geometry
+{
+    uav.stl
+    {
+        type triSurfaceMesh;
+        name uav;
+    }
+
+    shockAndWakeBox
+    {
+        type searchableBox;
+        min (-0.5 -1.6 -1.2);
+        max ( 4.2  1.6  1.2);
+    }
+}
+
+castellatedMeshControls
+{
+    maxLocalCells 1000000;
+    maxGlobalCells 40000000;    // full span, twice the half-model domain
+    minRefinementCells 10;
+    maxLoadUnbalance 0.10;
+    nCellsBetweenLevels 5;
+
+    features
+    (
+        {
+            file "uav.eMesh";
+            level 6;
+        }
+    );
+
+    refinementSurfaces
+{
+    uav
+    {
+        level (6 7);
+        regions
+        {
+            uav
+            {
+                level (6 7);
+                name uav_wall;
+            }
+        }
+    }
+}
+
+    resolveFeatureAngle 30;
+
+    refinementRegions
+    {
+        shockAndWakeBox
+        {
+            mode inside;
+            levels ((1.0 4));
+        }
+    }
+
+    locationInMesh (-2.114 1.275 0.833); 
+    allowFreeStandingZoneFaces true;
+}
+
+snapControls
+{
+    nSmoothPatch 3;
+    tolerance 2.0;
+    nSolveIter 15;
+    nRelaxIter 5;
+    nFeatureSnapIter 5;
+    implicitFeatureSnap false;
+    explicitFeatureSnap true;
+    multiRegionFeatureSnap false;
+}
+
+addLayersControls
+{
+    relativeSizes false;
+    layers
+    {
+        uav
+        {
+            nSurfaceLayers 20;
+        }
+    }
+
+    // Wall-resolved (y+ ~ 1). firstLayerThickness and minThickness are
+    // overwritten by supersonic_detail_run.py from TARGET_YPLUS
+    thicknessModel firstAndExpansion;
+    firstLayerThickness 5e-06;
+    expansionRatio 1.15;
+    minThickness 5e-06;
+    nGrow 0;
+    featureAngle 130;
+    slipFeatureAngle 30;
+    nRelaxIter 5;
+    nSmoothSurfaceNormals 1;
+    nSmoothNormals 3;
+    nSmoothThickness 10;
+    maxFaceThicknessRatio 0.5;
+    maxThicknessToMedialRatio 0.3;
+    minMedialAxisAngle 90;
+    nBufferCellsNoExtrude 0;
+    nLayerIter 50;
+}
+
+meshQualityControls
+{
+    maxNonOrtho 60;
+    maxBoundarySkewness 20;
+    maxInternalSkewness 4;
+    maxConcave 80;
+    minFlatness 0.5;
+    minVol 1e-13;
+    minTetQuality 1e-30;
+    minArea -1;
+    minTwist 0.02;
+    minDeterminant 0.001;
+    minFaceWeight 0.05;
+    minVolRatio 0.01;
+    triangleTwist true;
+    nSmoothScale 4;
+    errorReduction 0.75;
+    minTriangleTwist -1;
+}
+
+debug 0;

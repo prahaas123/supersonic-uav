@@ -1,0 +1,45 @@
+/*--------------------------------*- C++ -*----------------------------------*\
+| =========                 |                                                 |
+| \\      /  F ield         | OpenFOAM: The Open Source CFD Toolbox           |
+|  \\    /   O peration     | Version: v2312                                  |
+|   \\  /    A nd           | Web: www.openfoam.com                           |
+|    \\/     M anipulation  |                                                 |
+\*---------------------------------------------------------------------------*/
+FoamFile
+{
+    version     2.0;
+    format      ascii;
+    class       volScalarField;
+    object      T;
+}
+// ============================================================================
+
+#include        "include/freeStreamVars"
+dimensions      [0 0 0 1 0 0 0];
+internalField   uniform $Tinf;
+
+boundaryField
+{
+    inlet
+    {
+        type            fixedValue;
+        value           uniform $Tinf;
+    }
+
+    outlet
+    {
+        type            zeroGradient;
+    }
+
+    farfield
+    {
+        type            freestream;
+        freestreamValue uniform $Tinf;
+    }
+
+    uav
+    {
+        // Adiabatic (zeroGradient) or isothermal (fixedValue) wall
+        #include        "include/wallThermal"
+    }
+}
