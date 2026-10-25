@@ -48,7 +48,7 @@ castellatedMeshControls
     (
         {
             file "uav.eMesh";
-            level 6;
+            level 7;
         }
     );
 
@@ -56,12 +56,12 @@ castellatedMeshControls
 {
     uav
     {
-        level (6 7);
+        level (7 8);    // one level finer than the optimization mesh (6 7)
         regions
         {
             uav
             {
-                level (6 7);
+                level (7 8);
                 name uav_wall;
             }
         }

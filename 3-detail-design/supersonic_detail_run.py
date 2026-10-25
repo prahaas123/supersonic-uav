@@ -22,7 +22,7 @@ DESIGN_ID     = 236
 ALTITUDE_M    = 15000.0     # [m]
 MACH          = 1.5
 NP            = 50           # MPI processes
-END_TIME      = 0.02        # [s]
+END_TIME      = 0.005       # [s]
 WRITE_INTERVAL = END_TIME / 10   # [s] periodic writes so a timed-out job can be resumed
 
 # Full model, no symmetry plane
@@ -155,12 +155,10 @@ def design_point(atm, u_inf, refs, mesh_directory, alpha, beta):
               f"(Cd drift {results.get('Cd_drift_pct')} %). "
               f"Treat this result as unusable.")
 
-    # 4. Post Processing
-    # post_process.py rewrites metrics.json and the convergence plots with the
-    # half-model factor, so both are written again afterwards
-    print("[4/5] Post processing in Paraview...")
-    post_process(job_directory)
-    write_json(job_directory, results)
+    # 4. Convergence plots (ParaView post processing skipped for now)
+    print("[4/5] Plotting convergence histories...")
+    # post_process(job_directory)
+    # write_json(job_directory, results)
     plot_convergence(job_directory, results)
 
     # 5. Clean Up
