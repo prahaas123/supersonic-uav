@@ -97,7 +97,7 @@
 
 ## 8. Chosen Design
 
-- Design XXX: explain why
+- Design 236: explain why
 
 ## 9. Next steps
 
