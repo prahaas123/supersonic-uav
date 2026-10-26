@@ -102,13 +102,13 @@ addLayersControls
     {
         uav
         {
-            nSurfaceLayers 20;
+            nSurfaceLayers 30;
         }
     }
 
     thicknessModel firstAndExpansion;
     firstLayerThickness 5e-06;
-    expansionRatio 1.15;
+    expansionRatio 1.2;
     minThickness 5e-06;
     nGrow 0;
     featureAngle 130;
