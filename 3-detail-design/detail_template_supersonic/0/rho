@@ -25,18 +25,19 @@ boundaryField
         type            fixedValue;
         value           uniform $rhoInf;
     }
-
     outlet
     {
         type            zeroGradient;
     }
-
     farfield
     {
         type            freestream;
         freestreamValue uniform $rhoInf;
     }
-
+    symmetry
+    {
+        type            symmetry;
+    }
     uav
     {
         type            zeroGradient;

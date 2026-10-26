@@ -25,21 +25,21 @@ boundaryField
         type            fixedValue;
         value           uniform $omegaInf;
     }
-
     outlet
     {
         type            zeroGradient;
     }
-
     farfield
     {
         type            freestream;
         freestreamValue uniform $omegaInf;
     }
-
+    symmetry
+    {
+        type            symmetry;
+    }
     uav
     {
-        // Blends viscous-sublayer and log-law omega, valid at y+ ~ 1
         type            omegaWallFunction;
         value           uniform $omegaInf;
     }

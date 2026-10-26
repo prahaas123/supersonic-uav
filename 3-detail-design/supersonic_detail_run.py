@@ -24,23 +24,15 @@ MACH          = 1.5
 NP            = 50           # MPI processes
 END_TIME      = 0.005       # [s]
 WRITE_INTERVAL = END_TIME / 10   # [s] periodic writes so a timed-out job can be resumed
-
-# Full model, no symmetry plane
-SYMMETRY      = 1.0
-
-# Boundary layer mesh: first cell height from a flat-plate estimate at the reference chord
+HALF_MODEL    = True
+SYMMETRY      = 2.0 if HALF_MODEL else 1.0
 TARGET_YPLUS  = 1.0
 
-# Wall thermal condition: None = adiabatic (wallHeatFlux ~ 0),
-# a value [K] = isothermal wall (wallHeatFlux gives the heat load at that wall temperature)
+# Wall thermal condition: None = adiabatic (wallHeatFlux ~ 0), a value [K] = isothermal wall
 WALL_TEMPERATURE = None
 
-# Freestream angles (alpha, beta) [deg], each case reuses the same mesh.
-# Positive alpha: flow from below (+z component). Positive beta: wind from the
-# right wing (+y), i.e. a -y velocity component. Keep both small (cruise).
-FLOW_ANGLES = [
-    (0.0, 0.0),
-]
+ALPHAS        = [0.0, 5.0]
+COEFFS        = ("Cd", "Cl", "CmPitch")
 
 # Continue cases whose processor* directories survived a timed-out job
 RESUME        = False
@@ -104,28 +96,28 @@ def main():
             return 1
         print(f"[mesh] done in {time.perf_counter() - t_start:.1f} s")
 
-    # 2. Flow angle cases
+    # 2. Angle of attack cases
     all_converged = True
-    for alpha, beta in FLOW_ANGLES:
-        results = design_point(atm, u_inf, refs, mesh_directory, alpha, beta)
+    for alpha in ALPHAS:
+        results = design_point(atm, u_inf, refs, mesh_directory, alpha)
         all_converged = all_converged and bool(results and results.get("converged"))
 
     return 0 if all_converged else 2
 
-def design_point(atm, u_inf, refs, mesh_directory, alpha, beta):
-    job_directory = f"./design_{DESIGN_ID}_a{alpha:g}_b{beta:g}"
+def design_point(atm, u_inf, refs, mesh_directory, alpha):
+    job_directory = f"./design_{DESIGN_ID}_a{alpha:g}"
     job_id = os.path.basename(os.path.normpath(job_directory))
     resume = RESUME and os.path.isdir(f"{job_directory}/processor0")
 
     print(f"\n{'='*40}")
-    print(f"Starting Simulation: {job_id} | alpha {alpha} deg | beta {beta} deg"
+    print(f"Starting Simulation: {job_id} | alpha {alpha} deg"
           f"{' (resumed)' if resume else ''}")
     print(f"{'='*40}")
 
     # 1. Prepare Case Directory
     if not resume:
         print("[1/5] Copying mesh case and setting freestream...")
-        if not prepare_case(job_directory, mesh_directory, atm, u_inf, refs, alpha, beta):
+        if not prepare_case(job_directory, mesh_directory, atm, u_inf, refs, alpha):
             print(f"Error: Failed to prepare case for {job_id}. Skipping...")
             return write_failure(job_directory, "prepare_failed", refs)
 
@@ -140,7 +132,7 @@ def design_point(atm, u_inf, refs, mesh_directory, alpha, beta):
         print(f"Exception during solving: {e}")
         return write_failure(job_directory, "solve_failed", refs)
 
-    extra = {**refs, "alpha_deg": alpha, "beta_deg": beta,
+    extra = {**refs, "alpha_deg": alpha,
              "wall_temperature_K": WALL_TEMPERATURE,
              "solve_time_s": round(time.perf_counter() - t_start, 1)}
 
@@ -155,10 +147,10 @@ def design_point(atm, u_inf, refs, mesh_directory, alpha, beta):
               f"(Cd drift {results.get('Cd_drift_pct')} %). "
               f"Treat this result as unusable.")
 
-    # 4. Convergence plots (ParaView post processing skipped for now)
+    # 4. Convergence plots
     print("[4/5] Plotting convergence histories...")
-    # post_process(job_directory)
-    # write_json(job_directory, results)
+    post_process(job_directory)
+    write_json(job_directory, results)
     plot_convergence(job_directory, results)
 
     # 5. Clean Up
@@ -205,12 +197,12 @@ def first_layer_thickness(atm, u_inf, length, y_plus):
     u_tau = u_inf * math.sqrt(0.5 * cf)
     return y_plus * atm["nu"] / u_tau
 
-def flow_axes(alpha_deg, beta_deg):
+def flow_axes(alpha_deg):
     # Wind axes: drag along the freestream, lift normal to it in the x-z plane
-    a, b = math.radians(alpha_deg), math.radians(beta_deg)
-    drag  = (math.cos(a) * math.cos(b), -math.sin(b), math.sin(a) * math.cos(b))
+    a = math.radians(alpha_deg)
+    drag  = (math.cos(a), 0.0, math.sin(a))
     lift  = (-math.sin(a), 0.0, math.cos(a))
-    pitch = (math.cos(a) * math.sin(b), math.cos(b), math.sin(a) * math.sin(b))  # lift x drag
+    pitch = (0.0, 1.0, 0.0)
     return drag, lift, pitch
 
 def vec(v):
@@ -235,8 +227,9 @@ def prepare_mesh(job_directory, atm, u_inf, uav_params):
         shm_path = f"{job_directory}/system/snappyHexMeshDict"
         with open(shm_path, "r") as fh:
             shm = fh.read()
-        shm = re.sub(r"firstLayerThickness\s+[^;]+;", f"firstLayerThickness {y1:.4g};", shm)
-        shm = re.sub(r"minThickness\s+[^;]+;", f"minThickness {y1:.4g};", shm)
+        # Anchored to the keyword lines, an unanchored match also eats comments and thicknessModel
+        shm = re.sub(r"^(\s*)firstLayerThickness\s+[^;\n]+;", rf"\g<1>firstLayerThickness {y1:.4g};", shm, flags=re.M)
+        shm = re.sub(r"^(\s*)minThickness\s+[^;\n]+;", rf"\g<1>minThickness {y1:.4g};", shm, flags=re.M)
         with open(shm_path, "w") as fh:
             fh.write(shm)
         print(f"  first layer thickness {y1*1e6:.2f} um for y+ = {TARGET_YPLUS:g}")
@@ -251,7 +244,7 @@ def prepare_mesh(job_directory, atm, u_inf, uav_params):
         print(f"Exception during preparation: {e}")
         return None
 
-def prepare_case(job_directory, mesh_directory, atm, u_inf, refs, alpha, beta):
+def prepare_case(job_directory, mesh_directory, atm, u_inf, refs, alpha):
     try:
         if os.path.exists(job_directory):
             shutil.rmtree(job_directory)
@@ -260,7 +253,7 @@ def prepare_case(job_directory, mesh_directory, atm, u_inf, refs, alpha, beta):
         job_id = os.path.basename(os.path.normpath(job_directory))
         open(os.path.join(job_directory, f"{job_id}.foam"), "w").close()
 
-        drag, lift, pitch = flow_axes(alpha, beta)
+        drag, lift, pitch = flow_axes(alpha)
         u_vec = tuple(u_inf * c for c in drag)
 
         # controlDict
@@ -318,7 +311,8 @@ def mesh(job_directory):
         f"surfaceFeatureExtract -case {job_directory}",
         f"blockMesh -case {job_directory}",
         f"decomposePar -case {job_directory}",
-        f"mpirun -np {NP} snappyHexMesh -parallel -overwrite -case {job_directory}",
+        # Log kept in the case, the layer coverage table is at the end
+        f"set -o pipefail; mpirun -np {NP} snappyHexMesh -parallel -overwrite -case {job_directory} 2>&1 | tee {job_directory}/log.snappyHexMesh",
         f"reconstructParMesh -constant -case {job_directory}",
         f"rm -rf {job_directory}/processor*",
         # Mesh quality and layer report, kept for reference only
@@ -389,7 +383,7 @@ def read_wall_heat_flux(job_directory, patch="uav"):
     if row is None:
         return {}
     return {"heat_flux_min_W_m2": float(row[2]), "heat_flux_max_W_m2": float(row[3]),
-            "heat_load_W": float(row[4])}
+            "heat_load_W": float(row[4]) * SYMMETRY}
 
 def detail_metrics(job_directory, atm, u_inf, refs, extra):
     m = metrics.extract_metrics(job_directory, symmetry_factor=SYMMETRY)
@@ -397,9 +391,9 @@ def detail_metrics(job_directory, atm, u_inf, refs, extra):
 
     # forces/force.dat is in body (x, y, z) axes, these are the wind-axis coefficients
     tc, coeffs = read_coefficients(job_directory)
+    # Half model: side force, roll and yaw are not aircraft loads, so only these are kept
     q_s = 0.5 * atm["rho"] * u_inf**2 * refs["ref_area"]
-    span = 2.0 * refs["semi_span"]
-    for name in ("Cd", "Cs", "Cl", "CmRoll", "CmPitch", "CmYaw"):
+    for name in COEFFS:
         if name not in coeffs:
             continue
         st = metrics.window_stats(tc, coeffs[name], metrics.TAIL_FRACTION, SYMMETRY)
@@ -412,12 +406,6 @@ def detail_metrics(job_directory, atm, u_inf, refs, extra):
         m["drag_wind_N"] = m["Cd"] * q_s
         m["lift_wind_N"] = m["Cl"] * q_s
         m["LD_ratio"] = m["Cl"] / m["Cd"] if m["Cd"] else None
-    if "Cs" in m:
-        m["side_wind_N"] = m["Cs"] * q_s
-    # forceCoeffs uses lRef (MAC) for every moment, roll and yaw are usually per span
-    for name, key in (("CmRoll", "Cl_roll_span"), ("CmYaw", "Cn_yaw_span")):
-        if name in m:
-            m[key] = m[name] * refs["ref_chord"] / span
 
     m.update(read_wall_heat_flux(job_directory))
 
@@ -437,14 +425,12 @@ def format_detail_summary(m):
 
     bar = "=" * 52
     return "\n".join([
-        f" WIND AXES   alpha {fmt('alpha_deg', 'g')} deg | beta {fmt('beta_deg', 'g')} deg",
+        f" WIND AXES   alpha {fmt('alpha_deg', 'g')} deg",
         bar,
         f"  Drag  (wind)      :  {fmt('drag_wind_N', '10.3f')} N",
         f"  Lift  (wind)      :  {fmt('lift_wind_N', '10.3f')} N",
-        f"  Side  (wind)      :  {fmt('side_wind_N', '10.3f')} N",
-        f"  Cd / Cl / Cs      :  {fmt('Cd')} / {fmt('Cl')} / {fmt('Cs')}",
+        f"  Cd / Cl           :  {fmt('Cd')} / {fmt('Cl')}",
         f"  Cm pitch (MAC)    :  {fmt('CmPitch')}",
-        f"  Cl roll / Cn yaw  :  {fmt('Cl_roll_span')} / {fmt('Cn_yaw_span')}  (per span)",
         f"  L/D               :  {fmt('LD_ratio', '.4f')}",
         f"  Cd drift          :  {fmt('Cd_drift_pct', '+.4f')} %",
         f"  wall heat flux    :  {fmt('heat_flux_min_W_m2', '.4g')} to "
@@ -465,13 +451,9 @@ def plot_convergence(job_directory, m):
             return
         images = os.path.join(job_directory, "images")
         os.makedirs(images, exist_ok=True)
-        # Body-axis force plots from post_process.py are doubled for a full model
-        for stale in ("convergence_lift.png", "convergence_drag.png"):
-            if os.path.exists(os.path.join(images, stale)):
-                os.remove(os.path.join(images, stale))
 
         tail = metrics.TAIL_FRACTION
-        for name in ("Cd", "Cl", "Cs", "CmPitch", "CmRoll", "CmYaw"):
+        for name in COEFFS:
             if name not in coeffs:
                 continue
             t, y = tc, coeffs[name] * SYMMETRY

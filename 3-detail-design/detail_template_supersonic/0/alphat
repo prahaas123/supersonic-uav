@@ -24,19 +24,20 @@ boundaryField
         type            calculated;
         value           uniform 0;
     }
-
     outlet
     {
         type            calculated;
         value           uniform 0;
     }
-
     farfield
     {
         type            calculated;
         value           uniform 0;
     }
-
+    symmetry
+    {
+        type            symmetry;
+    }
     uav
     {
         type            compressible::alphatWallFunction;

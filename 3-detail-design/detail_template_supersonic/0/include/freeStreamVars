@@ -1,4 +1,3 @@
-// Default: Mach 1.5, 15 km ISA, alpha = beta = 0. Overwritten by supersonic_detail_run.py
 Uinf  (442.6 0.0 0.0);
 pInf  12111.8;
 Tinf  216.65;
