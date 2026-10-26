@@ -22,11 +22,11 @@ DESIGN_ID     = 236
 ALTITUDE_M    = 15000.0     # [m]
 MACH          = 1.5
 NP            = 50           # MPI processes
-END_TIME      = 0.005       # [s]
+END_TIME      = 0.01        # [s]
 WRITE_INTERVAL = END_TIME / 10   # [s] periodic writes so a timed-out job can be resumed
 HALF_MODEL    = True
 SYMMETRY      = 2.0 if HALF_MODEL else 1.0
-TARGET_YPLUS  = 1.0
+TARGET_YPLUS  = 30.0
 
 # Wall thermal condition: None = adiabatic (wallHeatFlux ~ 0), a value [K] = isothermal wall
 WALL_TEMPERATURE = None
