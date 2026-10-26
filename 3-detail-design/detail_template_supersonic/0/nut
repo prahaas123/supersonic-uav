@@ -24,19 +24,20 @@ boundaryField
         type            calculated;
         value           uniform 7.3e-05;
     }
-
     outlet
     {
         type            calculated;
         value           uniform 7.3e-05;
     }
-
     farfield
     {
         type            calculated;
         value           uniform 7.3e-05;
     }
-
+    symmetry
+    {
+        type            symmetry;
+    }
     uav
     {
         type            nutLowReWallFunction;

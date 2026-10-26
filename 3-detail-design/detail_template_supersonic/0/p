@@ -25,18 +25,19 @@ boundaryField
         type            fixedValue;
         value           uniform $pInf;
     }
-
     outlet
     {
         type            zeroGradient;
     }
-
     farfield
     {
         type            freestreamPressure;
         freestreamValue uniform $pInf;
     }
-
+    symmetry
+    {
+        type            symmetry;
+    }
     uav
     {
         type            zeroGradient;

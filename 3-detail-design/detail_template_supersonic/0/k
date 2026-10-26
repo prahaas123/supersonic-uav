@@ -25,21 +25,21 @@ boundaryField
         type            fixedValue;
         value           uniform $kinf;
     }
-
     outlet
     {
         type            zeroGradient;
     }
-
     farfield
     {
         type            freestream;
         freestreamValue uniform $kinf;
     }
-
+    symmetry
+    {
+        type            symmetry;
+    }
     uav
     {
-        // Wall-resolved (y+ ~ 1): k -> 0 at the wall
         type            fixedValue;
         value           uniform 1e-10;
     }

@@ -25,21 +25,21 @@ boundaryField
         type            fixedValue;
         value           uniform $Tinf;
     }
-
     outlet
     {
         type            zeroGradient;
     }
-
     farfield
     {
         type            freestream;
         freestreamValue uniform $Tinf;
     }
-
+    symmetry
+    {
+        type            symmetry;
+    }
     uav
     {
-        // Adiabatic (zeroGradient) or isothermal (fixedValue) wall
         #include        "include/wallThermal"
     }
 }

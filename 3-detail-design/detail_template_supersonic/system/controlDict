@@ -19,9 +19,9 @@ startFrom       latestTime;
 startTime       0;
 stopAt          endTime;
 endTime         5e-3;
-deltaT          1e-9;      // y+ ~ 1 first cell, adjustTimeStep grows it from here
+deltaT          1e-9;
 writeControl    adjustable;
-writeInterval   5e-4;      // periodic writes so a timed-out job can be resumed
+writeInterval   5e-4;
 purgeWrite      2;
 writeFormat     binary;
 writePrecision  15;
@@ -49,7 +49,7 @@ functions
         rhoInf          0.1948;     // [kg/m3]
         pRef            12112;      // [Pa]
 
-        // Wind axes, rotated with Uinf by supersonic_detail_run.py
+        // Wind axes
         liftDir         (0 0 1);
         dragDir         (1 0 0);
         pitchAxis       (0 1 0);
@@ -60,7 +60,6 @@ functions
         lRef            0.30;           // Reference chord length [m]
         Aref            0.60;           // Reference planform area [m2]
     }
-
     forces
     {
         type            forces;
@@ -75,7 +74,6 @@ functions
         pRef            12112;
         CofR            (1.0 0.0 0.0);
     }
-
     yPlus
     {
         type            yPlus;
@@ -84,7 +82,6 @@ functions
         writeControl    writeTime;
         patches         (uav);
     }
-
     MachNo
     {
         type            MachNo;
@@ -92,7 +89,6 @@ functions
         executeControl  writeTime;
         writeControl    writeTime;
     }
-
     Cp
     {
         type            pressure;
@@ -104,7 +100,6 @@ functions
         executeControl  writeTime;
         writeControl    writeTime;
     }
-
     wallShearStress
     {
         type            wallShearStress;
@@ -115,8 +110,6 @@ functions
         writeControl    writeTime;
         writeInterval   1;
     }
-
-    // Zero on an adiabatic wall, set WALL_TEMPERATURE in supersonic_detail_run.py
     wallHeatFlux
     {
         type            wallHeatFlux;
@@ -126,7 +119,6 @@ functions
         executeControl  writeTime;
         writeControl    writeTime;
     }
-
     residuals
     {
         type            solverInfo;
