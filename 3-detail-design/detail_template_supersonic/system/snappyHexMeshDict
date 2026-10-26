@@ -48,7 +48,7 @@ castellatedMeshControls
     (
         {
             file "uav.eMesh";
-            level 7;
+            level 8;
         }
     );
 
@@ -102,14 +102,14 @@ addLayersControls
     {
         uav
         {
-            nSurfaceLayers 30;
+            nSurfaceLayers 8;
         }
     }
 
     thicknessModel firstAndExpansion;
-    firstLayerThickness 5e-06;
+    firstLayerThickness 1.31e-04;
     expansionRatio 1.2;
-    minThickness 5e-06;
+    minThickness 1.31e-04;
     nGrow 0;
     featureAngle 130;
     slipFeatureAngle 30;

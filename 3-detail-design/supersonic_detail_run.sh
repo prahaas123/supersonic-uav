@@ -2,7 +2,7 @@
 
 #SBATCH --job-name=supersonic_detail_run
 #SBATCH --account=def-jphickey
-#SBATCH --time=7-00:00:00
+#SBATCH --time=2-00:00:00
 #SBATCH --nodes=1
 #SBATCH --ntasks-per-node=50
 #SBATCH --cpus-per-task=1

@@ -40,7 +40,7 @@ boundaryField
     }
     uav
     {
-        type            fixedValue;
-        value           uniform 1e-10;
+        type            kqRWallFunction;
+        value           uniform $kinf;
     }
 }
