@@ -1,0 +1,147 @@
+/*--------------------------------*- C++ -*----------------------------------*\
+| =========                 |                                                 |
+| \\      /  F ield         | OpenFOAM: The Open Source CFD Toolbox           |
+|  \\    /   O peration     | Version: v2312                                  |
+|   \\  /    A nd           | Web: www.openfoam.com                           |
+|    \\/     M anipulation  |                                                 |
+\*---------------------------------------------------------------------------*/
+FoamFile
+{
+    version     2.0;
+    format      ascii;
+    class       dictionary;
+    object      snappyHexMeshDict;
+}
+// ============================================================================
+
+castellatedMesh true;
+snap            true;
+addLayers       true;
+
+mergeTolerance 1e-6;
+
+geometry
+{
+    duct.stl
+    {
+        type triSurfaceMesh;
+        name duct;
+        regions
+        {
+            inlet     { name inlet; }
+            wall      { name wall; }
+            extension { name extension; }
+            outlet    { name outlet; }
+        }
+    }
+}
+
+castellatedMeshControls
+{
+    maxLocalCells 2000000;
+    maxGlobalCells 20000000;
+    minRefinementCells 10;
+    maxLoadUnbalance 0.10;
+    nCellsBetweenLevels 3;
+
+    features
+    (
+        {
+            file "duct.eMesh";
+            level 3;
+        }
+    );
+
+    refinementSurfaces
+    {
+        duct
+        {
+            level (2 3);
+            regions
+            {
+                inlet     { level (2 2); patchInfo { type patch; } }
+                outlet    { level (2 2); patchInfo { type patch; } }
+                wall      { level (2 3); patchInfo { type wall; } }
+                extension { level (2 2); patchInfo { type wall; } }
+            }
+        }
+    }
+
+    resolveFeatureAngle 30;
+
+    // Uniform level 2 (BASE_CELL / 4) through the whole duct
+    refinementRegions
+    {
+        duct
+        {
+            mode inside;
+            levels ((1e15 2));
+        }
+    }
+
+    locationInMesh (0.840123 0.000123 0.051823);   // set by run_inlet.py
+    allowFreeStandingZoneFaces true;
+}
+
+snapControls
+{
+    nSmoothPatch 3;
+    tolerance 2.0;
+    nSolveIter 30;
+    nRelaxIter 5;
+    nFeatureSnapIter 10;
+    implicitFeatureSnap false;
+    explicitFeatureSnap true;
+    multiRegionFeatureSnap false;
+}
+
+addLayersControls
+{
+    relativeSizes false;
+    layers
+    {
+        "(wall|extension)"
+        {
+            nSurfaceLayers 5;
+        }
+    }
+
+    thicknessModel firstAndExpansion;
+    firstLayerThickness 0.0002567;     // set by run_inlet.py
+    expansionRatio 1.2;
+    minThickness 0.0001283;            // set by run_inlet.py
+    nGrow 0;
+    featureAngle 130;
+    slipFeatureAngle 30;
+    nRelaxIter 5;
+    nSmoothSurfaceNormals 1;
+    nSmoothNormals 3;
+    nSmoothThickness 10;
+    maxFaceThicknessRatio 0.5;
+    maxThicknessToMedialRatio 0.3;
+    minMedialAxisAngle 90;
+    nBufferCellsNoExtrude 0;
+    nLayerIter 50;
+}
+
+meshQualityControls
+{
+    maxNonOrtho 65;
+    maxBoundarySkewness 20;
+    maxInternalSkewness 4;
+    maxConcave 80;
+    minFlatness 0.5;
+    minVol 1e-15;
+    minTetQuality 1e-30;
+    minArea -1;
+    minTwist 0.02;
+    minDeterminant 0.001;
+    minFaceWeight 0.05;
+    minVolRatio 0.01;
+    triangleTwist true;
+    nSmoothScale 4;
+    errorReduction 0.75;
+    minTriangleTwist -1;
+}
+
+debug 0;

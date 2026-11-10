@@ -1,0 +1,47 @@
+/*--------------------------------*- C++ -*----------------------------------*\
+| =========                 |                                                 |
+| \\      /  F ield         | OpenFOAM: The Open Source CFD Toolbox           |
+|  \\    /   O peration     | Version: v2312                                  |
+|   \\  /    A nd           | Web: www.openfoam.com                           |
+|    \\/     M anipulation  |                                                 |
+\*---------------------------------------------------------------------------*/
+FoamFile
+{
+    version     2.0;
+    format      ascii;
+    class       volScalarField;
+    object      p;
+}
+// ============================================================================
+
+#include        "include/initialConditions"
+dimensions      [1 -1 -2 0 0 0 0];
+internalField   uniform $pOut;
+
+boundaryField
+{
+    inlet
+    {
+        // Isentropic total pressure behind the 2D external compression
+        type            totalPressure;
+        p0              uniform $p0In;
+        rho             none;
+        psi             thermo:psi;
+        gamma           1.4;
+        value           uniform $p0In;
+    }
+    outlet
+    {
+        // Engine back pressure
+        type            fixedValue;
+        value           uniform $pOut;
+    }
+    "(wall|extension)"
+    {
+        type            zeroGradient;
+    }
+    background
+    {
+        type            zeroGradient;
+    }
+}

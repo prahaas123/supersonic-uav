@@ -1,0 +1,45 @@
+/*--------------------------------*- C++ -*----------------------------------*\
+| =========                 |                                                 |
+| \\      /  F ield         | OpenFOAM: The Open Source CFD Toolbox           |
+|  \\    /   O peration     | Version: v2312                                  |
+|   \\  /    A nd           | Web: www.openfoam.com                           |
+|    \\/     M anipulation  |                                                 |
+\*---------------------------------------------------------------------------*/
+FoamFile
+{
+    version     2.0;
+    format      ascii;
+    class       volScalarField;
+    object      T;
+}
+// ============================================================================
+
+#include        "include/initialConditions"
+dimensions      [0 0 0 1 0 0 0];
+internalField   uniform $TInit;
+
+boundaryField
+{
+    inlet
+    {
+        type            totalTemperature;
+        T0              uniform $T0In;
+        gamma           1.4;
+        value           uniform $T0In;
+    }
+    outlet
+    {
+        type            inletOutlet;
+        inletValue      uniform $TInit;
+        value           uniform $TInit;
+    }
+    "(wall|extension)"
+    {
+        // Adiabatic wall
+        type            zeroGradient;
+    }
+    background
+    {
+        type            zeroGradient;
+    }
+}

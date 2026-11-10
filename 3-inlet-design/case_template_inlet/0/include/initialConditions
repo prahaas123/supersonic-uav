@@ -1,0 +1,9 @@
+p0In        41564.5;
+T0In        314.142;
+pOut        38310.6;
+TInit       306.91;
+UInit       (120.551 0 0);
+kInit       152.134;
+omegaInit   4925.05;
+turbIntensity 0.05;
+mixingLength  0.00457238;
