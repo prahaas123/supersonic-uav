@@ -22,15 +22,19 @@ boundaryField
 {
     inlet
     {
-        type            pressureInletOutletVelocity;
+        // Engine demand imposed at the capture plane, ramped up from rest (table set by run_inlet.py).
+        // Velocity in + pressure out is well posed; a velocity outlet with zeroGradient p was not.
+        type            flowRateInletVelocity;
+        massFlowRate    table ((0 0.0527) (1500 0.2635));
+        rho             rho;
+        rhoInlet        0.5;            // only used before rho exists on the patch
+        extrapolateProfile no;
         value           uniform $UInit;
     }
     outlet
     {
-        // Engine demand: fixed mass flow, ramped up from rest (table set by run_inlet.py)
-        type            flowRateOutletVelocity;
-        massFlowRate    table ((0 0.0527) (1500 0.2635));
-        rho             rho;
+        type            inletOutlet;
+        inletValue      uniform (0 0 0);
         value           uniform $UInit;
     }
     "(wall|extension)"

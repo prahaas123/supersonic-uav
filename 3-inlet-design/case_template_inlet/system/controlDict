@@ -59,8 +59,8 @@ functions
         operation       sum;
         fields          (phi);
     }
-    // Area-averaged static pressure at the outlet (the back pressure is now a result)
-    outletPressure
+    // Area-averaged static pressure at the capture plane (free there, the outlet p is fixed)
+    inletPressure
     {
         type            surfaceFieldValue;
         libs            (fieldFunctionObjects);
@@ -69,7 +69,7 @@ functions
         log             false;
         writeFields     false;
         regionType      patch;
-        name            outlet;
+        name            inlet;
         operation       areaAverage;
         fields          (p);
     }

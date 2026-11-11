@@ -16,6 +16,7 @@ ALTITUDE_M     = 15000.0     # [m]
 MACH           = 1.5
 PT_RECOVERY_2D = 0.94        # total pressure recovery of the 2D external compression (2d-inlet-designs.csv)
 MDOT_TARGET    = 0.2635      # RDE air mass flow [kg/s] (README, section 1)
+ETA_DUCT_EST   = 0.96        # assumed S-duct p0 recovery, only sets the outlet p (first baseline: 0.959)
 
 # Run settings
 NP             = 50          # MPI processes
@@ -27,10 +28,17 @@ YPLUS_RANGE    = (30.0, 100.0)  # wall-function range, average y+ outside it is 
 EXT_LENGTH_D   = 1.5         # straight extension after the engine face [engine-face diameters]
 N_EXT          = 13          # axial stations on the extension
 TURB_INTENSITY = 0.05        # at the capture plane, behind the shock system
-RAMP_ITERS     = 1500        # outlet mass flow ramps from 20 % to MDOT_TARGET over these iterations
-MASS_IMBALANCE_TOL_PCT = 0.5 # |inlet - outlet| mass flow for a converged run
-MDOT_OSC_TOL_PCT       = 0.2 # capture mass flow half peak-to-peak / mean over the window
-MDOT_TARGET_TOL_PCT    = 0.5 # |mean capture mass flow / MDOT_TARGET - 1|
+RAMP_ITERS     = 1500        # inlet mass flow ramps from 20 % to MDOT_TARGET over these iterations (fixed schedule)
+
+# Convergence (iterative) checks, evaluated over the averaging window
+MASS_IMBALANCE_TOL_PCT = 0.5 # |inlet - outlet| mass flow
+MDOT_OSC_TOL_PCT       = 0.2 # outlet mass flow half peak-to-peak / mean (the inlet one is imposed)
+P_CAP_OSC_TOL_PCT      = 0.2 # capture-plane static pressure half peak-to-peak / mean
+MDOT_TARGET_TOL_PCT    = 0.5 # |mean outlet mass flow / MDOT_TARGET - 1|
+CONT_ERR_TOL           = 1e-3  # mean "sum local" continuity error over the window
+# Physical checks, evaluated on the averaged fields
+T0_MARGIN_K            = 1.0 # duct T max may not exceed T0 by more than this (adiabatic duct)
+P0_CAP_DEV_WARN_PCT    = 5.0 # warn when the capture p0 is this far from p0_capture (assumed ETA_DUCT_EST)
 
 GAMMA = 1.4
 R_GAS = 287.058
@@ -101,14 +109,12 @@ def design_point(params, job_directory):
     print("[5/6] Post processing in ParaView...")
     post_process(job_directory)
     plot_convergence(job_directory)
-    results = read_json(job_directory) or results
+    results = physical_checks(job_directory, read_json(job_directory) or results)
     print(format_summary(results))
 
     if not results.get("converged"):
-        print(f"WARNING: {job_id} did not converge (failed: {results.get('failed_checks')}; "
-              f"drift {results.get('mdot_drift_pct')} %, oscillation "
-              f"{results.get('mdot_osc_pct')} %, imbalance "
-              f"{results.get('mass_imbalance_pct')} %). Treat this result as unusable.")
+        print(f"WARNING: {job_id} failed {results.get('failed_checks')}. "
+              f"Treat this result as unusable.")
 
     # 6. Clean up
     print("[6/6] Cleaning up processor files...")
@@ -171,12 +177,15 @@ def flow_conditions(params):
     a_ef  = math.pi / 4.0 * bi.D_EF ** 2
     a_cap = a_ef / params["AR"]          # ellipse, W0 * H0 = D_EF^2 / AR
 
-    m_ef = subsonic_mach(MDOT_TARGET, a_ef, p0c, T0)
+    # Engine face: target mass flow at the capture p0 less an assumed duct loss. The outlet p is
+    # fixed to this static pressure; the capture p0 then comes out of the solution near p0c.
+    p0ef = ETA_DUCT_EST * p0c
+    m_ef = subsonic_mach(MDOT_TARGET, a_ef, p0ef, T0)
     if m_ef is None:
         raise ValueError("MDOT_TARGET is above the choked mass flow of the engine face")
     m_cap = subsonic_mach(MDOT_TARGET, a_cap, p0c, T0)
 
-    p_back = p0c / isentropic_ratio(m_ef) ** pexp
+    p_back = p0ef / isentropic_ratio(m_ef) ** pexp
     T_ef   = T0 / isentropic_ratio(m_ef)
     U_ef   = m_ef * math.sqrt(GAMMA * R_GAS * T_ef)
     rho_ef = p_back / (R_GAS * T_ef)
@@ -191,7 +200,7 @@ def flow_conditions(params):
     return dict(
         p_inf_Pa=atm["p"], T_inf_K=atm["T"],
         p0_inf_Pa=p0inf, T0_K=T0, p0_capture_Pa=p0c, p_back_Pa=p_back,
-        mdot_target_kg_s=MDOT_TARGET, pt_recovery_2d=PT_RECOVERY_2D,
+        mdot_target_kg_s=MDOT_TARGET, pt_recovery_2d=PT_RECOVERY_2D, eta_duct_est=ETA_DUCT_EST,
         capture_area_m2=a_cap, engine_face_area_m2=a_ef,
         # isentropic 1D estimates at the target mass flow (capture None = choked)
         mach_capture_1d=m_cap, mach_engine_face_1d=m_ef,
@@ -350,7 +359,7 @@ def prepare(job_directory, params):
             raise ValueError("RAMP_ITERS must end before the averaging window")
         _sub(cd, r"^(\s*)timeStart\s+[^;\n]+;", rf"\g<1>timeStart       {avg_start};")
 
-        # Outlet mass flow: ramp from 20 % of the target to the target, then hold
+        # Inlet mass flow: fixed schedule, 20 % of the target ramped to the target, then held
         _sub(os.path.join(job_directory, "0", "U"), r"^(\s*)massFlowRate\s+[^;\n]+;",
              rf"\g<1>massFlowRate    table ((0 {0.2 * MDOT_TARGET:.6g}) ({RAMP_ITERS} {MDOT_TARGET:.6g}));")
 
@@ -366,10 +375,10 @@ def prepare(job_directory, params):
             f.write(f"turbIntensity {TURB_INTENSITY:.6g};\n")
             f.write(f"mixingLength  {flow['mixing_length_m']:.6g};\n")
 
-        print(f"  outlet mass flow {MDOT_TARGET:g} kg/s (ramped over {RAMP_ITERS} it) | "
+        print(f"  inlet mass flow {MDOT_TARGET:g} kg/s (ramped over {RAMP_ITERS} it) | "
               f"fields averaged from iteration {avg_start}")
-        print(f"  p0 capture {flow['p0_capture_Pa']:.0f} Pa | T0 {flow['T0_K']:.2f} K | "
-              f"p back 1D (initial field only) {flow['p_back_Pa']:.0f} Pa | 1D Mach capture "
+        print(f"  p0 capture (expected) {flow['p0_capture_Pa']:.0f} Pa | T0 {flow['T0_K']:.2f} K | "
+              f"p back (fixed, eta_duct {ETA_DUCT_EST:g}) {flow['p_back_Pa']:.0f} Pa | 1D Mach capture "
               f"{flow['mach_capture_1d'] if flow['mach_capture_1d'] is None else round(flow['mach_capture_1d'], 3)}"
               f" / engine face {flow['mach_engine_face_1d']:.3f}")
 
@@ -466,7 +475,9 @@ def convergence_metrics(job_directory, extra):
          "drift_tolerance_pct": metrics.DRIFT_TOLERANCE_PCT,
          "mass_imbalance_tol_pct": MASS_IMBALANCE_TOL_PCT,
          "mdot_osc_tol_pct": MDOT_OSC_TOL_PCT,
-         "mdot_target_tol_pct": MDOT_TARGET_TOL_PCT, **extra}
+         "p_cap_osc_tol_pct": P_CAP_OSC_TOL_PCT,
+         "mdot_target_tol_pct": MDOT_TARGET_TOL_PCT,
+         "cont_err_tol": CONT_ERR_TOL, **extra}
 
     to, out = metrics._read_dat(job_directory, "massFlowOutlet", "surfaceFieldValue.dat", 2)
     ti, inn = metrics._read_dat(job_directory, "massFlowInlet", "surfaceFieldValue.dat", 2)
@@ -483,40 +494,89 @@ def convergence_metrics(job_directory, extra):
         write_json(job_directory, m)
         return m
 
-    # The outlet mass flow is imposed, so the capture plane is the free (convergence) signal
+    # The inlet mass flow is imposed, so the outlet mass flow and the capture pressure are the
+    # free (convergence) signals
     m["mdot_outlet_kg_s"]   = so["value"]
     m["mdot_inlet_kg_s"]    = si["value"]
-    m["mdot_drift_pct"]     = si["drift_pct"]
-    m["mdot_osc_pct"]       = 50.0 * (si["max"] - si["min"]) / si["value"]    # half peak-to-peak
-    m["mdot_std_pct"]       = 100.0 * si["std"] / si["value"]
+    m["mdot_drift_pct"]     = so["drift_pct"]
+    m["mdot_osc_pct"]       = 50.0 * (so["max"] - so["min"]) / so["value"]    # half peak-to-peak
+    m["mdot_std_pct"]       = 100.0 * so["std"] / so["value"]
     m["mass_imbalance_pct"] = 100.0 * (si["value"] - so["value"]) / so["value"]
-    m["mdot_ratio"]         = si["value"] / MDOT_TARGET
-    m["avg_window_start"]   = si["window_start"]
-    m["avg_window_end"]     = si["window_end"]
+    m["mdot_ratio"]         = so["value"] / MDOT_TARGET
+    m["avg_window_start"]   = so["window_start"]
+    m["avg_window_end"]     = so["window_end"]
 
-    # Back pressure the duct needs to pass MDOT_TARGET, and its oscillation
-    tp, pb = metrics._read_dat(job_directory, "outletPressure", "surfaceFieldValue.dat", 2)
-    sp = metrics.window_stats(tp, pb[:, 0]) if tp is not None else None
+    tp, pc = metrics._read_dat(job_directory, "inletPressure", "surfaceFieldValue.dat", 2)
+    sp = metrics.window_stats(tp, pc[:, 0]) if tp is not None else None
     if sp:
-        m["p_back_avg_Pa"]  = sp["value"]
-        m["p_back_osc_pct"] = 50.0 * (sp["max"] - sp["min"]) / sp["value"]
+        m["p_cap_static_avg_Pa"] = sp["value"]
+        m["p_cap_osc_pct"]       = 50.0 * (sp["max"] - sp["min"]) / sp["value"]
+        m["p_cap_drift_pct"]     = sp["drift_pct"]
+
+    m["cont_err_avg"] = continuity_error(job_directory, so["window_start"])
 
     m.update(metrics.read_yplus(job_directory, patch="wall"))
     ya = m.get("yplus_avg")
     m["yplus_in_range"] = ya is not None and YPLUS_RANGE[0] <= ya <= YPLUS_RANGE[1]
 
     drift, imb, osc = m["mdot_drift_pct"], m["mass_imbalance_pct"], m["mdot_osc_pct"]
+    pdrift, posc, cerr = m.get("p_cap_drift_pct"), m.get("p_cap_osc_pct"), m["cont_err_avg"]
     checks = {
-        "drift":     drift is not None and abs(drift) < metrics.DRIFT_TOLERANCE_PCT,
-        "oscillation": osc < MDOT_OSC_TOL_PCT,
-        "imbalance": abs(imb) < MASS_IMBALANCE_TOL_PCT,
-        "target":    abs(m["mdot_ratio"] - 1.0) * 100.0 < MDOT_TARGET_TOL_PCT,
+        "mdot_drift":       drift is not None and abs(drift) < metrics.DRIFT_TOLERANCE_PCT,
+        "mdot_oscillation": osc < MDOT_OSC_TOL_PCT,
+        "p_cap_drift":      pdrift is not None and abs(pdrift) < metrics.DRIFT_TOLERANCE_PCT,
+        "p_cap_oscillation": posc is not None and posc < P_CAP_OSC_TOL_PCT,
+        "imbalance":        abs(imb) < MASS_IMBALANCE_TOL_PCT,
+        "mdot_target":      abs(m["mdot_ratio"] - 1.0) * 100.0 < MDOT_TARGET_TOL_PCT,
+        "continuity":       cerr is not None and cerr < CONT_ERR_TOL,
     }
     m["failed_checks"] = [k for k, ok in checks.items() if not ok]
     m["converged"] = not m["failed_checks"]
     m["status"] = "ok" if m["converged"] else "not_converged"
     if not m["yplus_in_range"]:
         print(f"  WARNING: average y+ {ya} is outside {YPLUS_RANGE}, adjust TARGET_YPLUS")
+    write_json(job_directory, m)
+    return m
+
+def continuity_error(job_directory, t_start):
+    # Mean "sum local" continuity error from log.rhoSimpleFoam over iterations >= t_start
+    path = os.path.join(job_directory, "log.rhoSimpleFoam")
+    if not os.path.exists(path):
+        return None
+    vals, t = [], None
+    with open(path) as fh:
+        for line in fh:
+            if line.startswith("Time = "):
+                try:
+                    t = float(line.split()[2])
+                except (IndexError, ValueError):
+                    t = None
+            elif line.startswith("time step continuity errors") and t is not None and t >= t_start:
+                try:
+                    vals.append(float(line.split("sum local =")[1].split(",")[0]))
+                except (IndexError, ValueError):
+                    pass
+    return sum(vals) / len(vals) if vals else None
+
+def physical_checks(job_directory, m):
+    # Run after ParaView: reject solutions that break the energy equation or create total pressure
+    checks = {}
+    if m.get("pt_recovery_duct") is not None:
+        checks["p0_gain"] = m["pt_recovery_duct"] < 1.0
+    if m.get("duct_T_max") is not None and m.get("T0_K") is not None:
+        checks["T_above_T0"] = m["duct_T_max"] <= m["T0_K"] + T0_MARGIN_K
+    if not checks:
+        checks["post_missing"] = False
+    m["failed_physical_checks"] = [k for k, ok in checks.items() if not ok]
+    m["failed_checks"] = list(m.get("failed_checks") or []) + m["failed_physical_checks"]
+    m["converged"] = not m["failed_checks"]
+    m["status"] = "ok" if m["converged"] else "not_converged"
+
+    if m.get("cap_p0_avg") and m.get("p0_capture_Pa"):
+        m["p0_cap_dev_pct"] = 100.0 * (m["cap_p0_avg"] / m["p0_capture_Pa"] - 1.0)
+        if abs(m["p0_cap_dev_pct"]) > P0_CAP_DEV_WARN_PCT:
+            print(f"  WARNING: capture p0 is {m['p0_cap_dev_pct']:+.1f} % from the intended "
+                  f"{m['p0_capture_Pa']:.0f} Pa, ETA_DUCT_EST ({ETA_DUCT_EST}) is off for this design")
     write_json(job_directory, m)
     return m
 
@@ -534,7 +594,9 @@ def format_summary(m):
         f"  mass flow target  :  {f('mdot_target_kg_s', '.4f')} kg/s",
         f"  mass flow out/in  :  {f('mdot_outlet_kg_s', '.4f')} / {f('mdot_inlet_kg_s', '.4f')} kg/s"
         f"   (ratio {f('mdot_ratio', '.4f')})",
-        f"  back pressure     :  {f('p_back_avg_Pa', '.1f')} Pa   (osc {f('p_back_osc_pct', '.3f')} %)",
+        f"  back pressure     :  {f('p_back_Pa', '.1f')} Pa   (fixed, eta_duct est {f('eta_duct_est', '.3f')})",
+        f"  capture p0        :  {f('cap_p0_avg', '.1f')} Pa   (intended {f('p0_capture_Pa', '.1f')}, "
+        f"{f('p0_cap_dev_pct', '+.2f')} %)",
         "-" * 60,
         f"  flow metrics from :  {'mean fields' if m.get('fields_averaged') else 'LAST ITERATION (no mean fields)'}"
         f", iterations {f('avg_window_start', '.0f')} -> {f('avg_window_end', '.0f')}",
@@ -551,7 +613,10 @@ def format_summary(m):
         f"  mass flow drift   :  {f('mdot_drift_pct', '+.4f')} %   (tol {f('drift_tolerance_pct', '.2f')})",
         f"  mass flow osc     :  {f('mdot_osc_pct', '.4f')} %   (tol {f('mdot_osc_tol_pct', '.2f')}, "
         f"std {f('mdot_std_pct', '.4f')} %)",
+        f"  capture p drift   :  {f('p_cap_drift_pct', '+.4f')} %   (tol {f('drift_tolerance_pct', '.2f')})",
+        f"  capture p osc     :  {f('p_cap_osc_pct', '.4f')} %   (tol {f('p_cap_osc_tol_pct', '.2f')})",
         f"  mass imbalance    :  {f('mass_imbalance_pct', '+.4f')} %   (tol {f('mass_imbalance_tol_pct', '.2f')})",
+        f"  continuity error  :  {f('cont_err_avg', '.3g')}   (tol {f('cont_err_tol', '.0e')})",
         f"  y+  min/avg/max   :  {f('yplus_min', '.1f')} / {f('yplus_avg', '.1f')} / {f('yplus_max', '.1f')}"
         f"   (target avg {YPLUS_RANGE[0]:g}-{YPLUS_RANGE[1]:g}"
         f"{'' if m.get('yplus_in_range') else ', OUT OF RANGE'})",
@@ -584,7 +649,7 @@ def plot_convergence(job_directory):
                         label=f"target {MDOT_TARGET:g} kg/s")
             plt.axvspan(t_cut, to[-1], color="0.6", alpha=0.25,
                         label=f"averaging window (last {100*metrics.TAIL_FRACTION:.0f}%)")
-            tail = -inn[ti >= t_cut, 0]       # capture plane is the free signal, the outlet is imposed
+            tail = out[to >= t_cut, 0]        # outlet is the free signal, the inlet is imposed
             if len(tail) > 1:
                 lo = min(tail.min(), MDOT_TARGET); hi = max(tail.max(), MDOT_TARGET)
                 pad = max(0.5 * (hi - lo), 0.02 * hi)
@@ -769,8 +834,9 @@ def paraview_post(foam, images):
 
     if stats.get("cap_p0_avg"):
         stats["pt_recovery_duct"] = stats["ef_p0_avg"] / stats["cap_p0_avg"]
-    if m.get("p0_inf_Pa"):
-        stats["pt_recovery_total"] = stats["ef_p0_avg"] / m["p0_inf_Pa"]
+    if stats.get("pt_recovery_duct") is not None:
+        # The capture p0 is a result now, so chain the assumed 2D recovery with the duct ratio
+        stats["pt_recovery_total"] = m.get("pt_recovery_2d", PT_RECOVERY_2D) * stats["pt_recovery_duct"]
     stats["post_time"] = t
     stats["fields_averaged"] = averaged
 
