@@ -36,7 +36,7 @@ solvers
 SIMPLE
 {
     nNonOrthogonalCorrectors 1;
-    consistent      yes;          // SIMPLEC
+    consistent      no;           // classic SIMPLE, SIMPLEC with p relaxation 1 diverged at start-up
     transonic       no;           // subsonic diffuser, switch on if the capture plane chokes
     pMinFactor      0.5;
     pMaxFactor      1.5;
@@ -54,8 +54,8 @@ relaxationFactors
 {
     fields
     {
-        p               1;
-        rho             1;
+        p               0.3;
+        rho             0.05;
     }
     equations
     {

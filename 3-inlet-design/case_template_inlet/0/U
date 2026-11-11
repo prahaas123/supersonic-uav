@@ -16,7 +16,7 @@ FoamFile
 
 #include        "include/initialConditions"
 dimensions      [0 1 -1 0 0 0 0];
-internalField   uniform $UInit;
+internalField   uniform (0 0 0);     // start from rest, a uniform x-velocity diverged in the S-bend
 
 boundaryField
 {

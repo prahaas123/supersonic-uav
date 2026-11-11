@@ -19,7 +19,7 @@ MDOT_TARGET    = 0.2635      # RDE air mass flow [kg/s] (README, section 1)
 
 # Run settings
 NP             = 50          # MPI processes
-N_ITER         = 4000        # rhoSimpleFoam iterations
+N_ITER         = 8000        # rhoSimpleFoam iterations (residualControl may stop earlier)
 WRITE_INTERVAL = 500         # [iterations] periodic writes
 BASE_CELL      = 0.006       # background cell [m], refined to level 2 (1.5 mm) inside the duct
 TARGET_YPLUS   = 30.0        # wall functions, same as the external aero cases

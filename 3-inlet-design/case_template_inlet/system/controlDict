@@ -18,7 +18,7 @@ application     rhoSimpleFoam;
 startFrom       latestTime;
 startTime       0;
 stopAt          endTime;
-endTime         4000;           // iterations, set by run_inlet.py
+endTime         8000;           // iterations, set by run_inlet.py
 deltaT          1;
 writeControl    timeStep;
 writeInterval   500;            // set by run_inlet.py

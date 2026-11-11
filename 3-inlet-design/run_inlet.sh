@@ -2,7 +2,7 @@
 
 #SBATCH --job-name=inlet_run
 #SBATCH --account=def-jphickey
-#SBATCH --time=12:00:00
+#SBATCH --time=03:00:00
 #SBATCH --nodes=1
 #SBATCH --ntasks-per-node=50
 #SBATCH --cpus-per-task=1
