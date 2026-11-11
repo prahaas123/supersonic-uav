@@ -69,7 +69,7 @@
   - trimmed CG between 0.25 and 0.45 of the mean aerodynamic chord
   - trailing-edge sweep ≤ 35° on each wing segment (for manufacturability)
 - Constraints must hold at the surrogate mean ± 2σ to guard against surrogate error.
-- Each round proposes 5 well-spaced candidates. These are run in CFD, added to the data set, and the surrogates are refit. The loop was run 5 times, until R² ≥ 98.5 % for all three surrogates.
+- Each round proposes 5 well-spaced candidates. These are run in CFD, added to the data set, and the surrogates are refit. The loop was run 7 times, until R² ≥ 98.5 % for all three surrogates.
 
 ![Surrogate cross-validation](0-results/surrogate_cv.png)
 
