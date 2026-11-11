@@ -22,11 +22,15 @@ NP             = 50          # MPI processes
 N_ITER         = 8000        # rhoSimpleFoam iterations (residualControl may stop earlier)
 WRITE_INTERVAL = 500         # [iterations] periodic writes
 BASE_CELL      = 0.006       # background cell [m], refined to level 2 (1.5 mm) inside the duct
-TARGET_YPLUS   = 30.0        # wall functions, same as the external aero cases
+TARGET_YPLUS   = 40.0        # cell-centre y+ from the 1D estimate; the baseline run puts the wall at ~30-100
+YPLUS_RANGE    = (30.0, 100.0)  # wall-function range, average y+ outside it is flagged
 EXT_LENGTH_D   = 1.5         # straight extension after the engine face [engine-face diameters]
 N_EXT          = 13          # axial stations on the extension
 TURB_INTENSITY = 0.05        # at the capture plane, behind the shock system
+RAMP_ITERS     = 1500        # outlet mass flow ramps from 20 % to MDOT_TARGET over these iterations
 MASS_IMBALANCE_TOL_PCT = 0.5 # |inlet - outlet| mass flow for a converged run
+MDOT_OSC_TOL_PCT       = 0.2 # capture mass flow half peak-to-peak / mean over the window
+MDOT_TARGET_TOL_PCT    = 0.5 # |mean capture mass flow / MDOT_TARGET - 1|
 
 GAMMA = 1.4
 R_GAS = 287.058
@@ -101,8 +105,9 @@ def design_point(params, job_directory):
     print(format_summary(results))
 
     if not results.get("converged"):
-        print(f"WARNING: {job_id} did not converge (mass flow drift "
-              f"{results.get('mdot_drift_pct')} %, imbalance "
+        print(f"WARNING: {job_id} did not converge (failed: {results.get('failed_checks')}; "
+              f"drift {results.get('mdot_drift_pct')} %, oscillation "
+              f"{results.get('mdot_osc_pct')} %, imbalance "
               f"{results.get('mass_imbalance_pct')} %). Treat this result as unusable.")
 
     # 6. Clean up
@@ -199,7 +204,8 @@ def first_layer_thickness(rho, U, T, length, y_plus):
     re_l  = U * length / nu
     cf    = 0.026 / re_l ** (1.0 / 7.0)      # turbulent flat plate skin friction
     u_tau = U * math.sqrt(0.5 * cf)
-    return y_plus * nu / u_tau
+    # OpenFOAM evaluates y+ at the cell centre, half the first-layer height
+    return 2.0 * y_plus * nu / u_tau
 
 # ----------------------------------------------------------------------------
 # Geometry
@@ -336,6 +342,18 @@ def prepare(job_directory, params):
         _sub(cd, r"^endTime\s+[^;\n]+;", f"endTime         {N_ITER};")
         _sub(cd, r"^writeInterval\s+[^;\n]+;", f"writeInterval   {WRITE_INTERVAL};")
 
+        # fieldAverage over the same window the convergence check uses
+        sys.path.insert(0, TOOLS_DIR)
+        import metrics
+        avg_start = int(round(1 + (1.0 - metrics.TAIL_FRACTION) * (N_ITER - 1)))
+        if RAMP_ITERS >= avg_start:
+            raise ValueError("RAMP_ITERS must end before the averaging window")
+        _sub(cd, r"^(\s*)timeStart\s+[^;\n]+;", rf"\g<1>timeStart       {avg_start};")
+
+        # Outlet mass flow: ramp from 20 % of the target to the target, then hold
+        _sub(os.path.join(job_directory, "0", "U"), r"^(\s*)massFlowRate\s+[^;\n]+;",
+             rf"\g<1>massFlowRate    table ((0 {0.2 * MDOT_TARGET:.6g}) ({RAMP_ITERS} {MDOT_TARGET:.6g}));")
+
         # Boundary / initial values
         with open(os.path.join(job_directory, "0", "include", "initialConditions"), "w") as f:
             f.write(f"p0In        {flow['p0_capture_Pa']:.6g};\n")
@@ -348,15 +366,18 @@ def prepare(job_directory, params):
             f.write(f"turbIntensity {TURB_INTENSITY:.6g};\n")
             f.write(f"mixingLength  {flow['mixing_length_m']:.6g};\n")
 
+        print(f"  outlet mass flow {MDOT_TARGET:g} kg/s (ramped over {RAMP_ITERS} it) | "
+              f"fields averaged from iteration {avg_start}")
         print(f"  p0 capture {flow['p0_capture_Pa']:.0f} Pa | T0 {flow['T0_K']:.2f} K | "
-              f"p back {flow['p_back_Pa']:.0f} Pa | 1D Mach capture "
+              f"p back 1D (initial field only) {flow['p_back_Pa']:.0f} Pa | 1D Mach capture "
               f"{flow['mach_capture_1d'] if flow['mach_capture_1d'] is None else round(flow['mach_capture_1d'], 3)}"
               f" / engine face {flow['mach_engine_face_1d']:.3f}")
 
         return {**params, **flow,
                 "duct_length_m": L, "x_lip_m": bi.X_LIP, "x_engine_face_m": x_ef,
                 "x_outlet_m": x_out, "extension_length_m": x_out - x_ef,
-                "first_layer_m": y1, "target_yplus": TARGET_YPLUS, "base_cell_m": BASE_CELL}
+                "first_layer_m": y1, "target_yplus": TARGET_YPLUS, "base_cell_m": BASE_CELL,
+                "ramp_iters": RAMP_ITERS, "avg_start_iter": avg_start}
     except Exception as e:
         print(f"Exception during preparation: {e}")
         return None
@@ -443,7 +464,9 @@ def convergence_metrics(job_directory, extra):
     m = {"case": os.path.abspath(job_directory), "status": "ok", "converged": False,
          "tail_fraction": metrics.TAIL_FRACTION,
          "drift_tolerance_pct": metrics.DRIFT_TOLERANCE_PCT,
-         "mass_imbalance_tol_pct": MASS_IMBALANCE_TOL_PCT, **extra}
+         "mass_imbalance_tol_pct": MASS_IMBALANCE_TOL_PCT,
+         "mdot_osc_tol_pct": MDOT_OSC_TOL_PCT,
+         "mdot_target_tol_pct": MDOT_TARGET_TOL_PCT, **extra}
 
     to, out = metrics._read_dat(job_directory, "massFlowOutlet", "surfaceFieldValue.dat", 2)
     ti, inn = metrics._read_dat(job_directory, "massFlowInlet", "surfaceFieldValue.dat", 2)
@@ -460,17 +483,40 @@ def convergence_metrics(job_directory, extra):
         write_json(job_directory, m)
         return m
 
+    # The outlet mass flow is imposed, so the capture plane is the free (convergence) signal
     m["mdot_outlet_kg_s"]   = so["value"]
     m["mdot_inlet_kg_s"]    = si["value"]
-    m["mdot_drift_pct"]     = so["drift_pct"]
+    m["mdot_drift_pct"]     = si["drift_pct"]
+    m["mdot_osc_pct"]       = 50.0 * (si["max"] - si["min"]) / si["value"]    # half peak-to-peak
+    m["mdot_std_pct"]       = 100.0 * si["std"] / si["value"]
     m["mass_imbalance_pct"] = 100.0 * (si["value"] - so["value"]) / so["value"]
-    m["mdot_ratio"]         = so["value"] / MDOT_TARGET
-    m.update(metrics.read_yplus(job_directory, patch="wall"))
+    m["mdot_ratio"]         = si["value"] / MDOT_TARGET
+    m["avg_window_start"]   = si["window_start"]
+    m["avg_window_end"]     = si["window_end"]
 
-    drift, imb = m["mdot_drift_pct"], m["mass_imbalance_pct"]
-    m["converged"] = (drift is not None and abs(drift) < metrics.DRIFT_TOLERANCE_PCT
-                      and abs(imb) < MASS_IMBALANCE_TOL_PCT)
+    # Back pressure the duct needs to pass MDOT_TARGET, and its oscillation
+    tp, pb = metrics._read_dat(job_directory, "outletPressure", "surfaceFieldValue.dat", 2)
+    sp = metrics.window_stats(tp, pb[:, 0]) if tp is not None else None
+    if sp:
+        m["p_back_avg_Pa"]  = sp["value"]
+        m["p_back_osc_pct"] = 50.0 * (sp["max"] - sp["min"]) / sp["value"]
+
+    m.update(metrics.read_yplus(job_directory, patch="wall"))
+    ya = m.get("yplus_avg")
+    m["yplus_in_range"] = ya is not None and YPLUS_RANGE[0] <= ya <= YPLUS_RANGE[1]
+
+    drift, imb, osc = m["mdot_drift_pct"], m["mass_imbalance_pct"], m["mdot_osc_pct"]
+    checks = {
+        "drift":     drift is not None and abs(drift) < metrics.DRIFT_TOLERANCE_PCT,
+        "oscillation": osc < MDOT_OSC_TOL_PCT,
+        "imbalance": abs(imb) < MASS_IMBALANCE_TOL_PCT,
+        "target":    abs(m["mdot_ratio"] - 1.0) * 100.0 < MDOT_TARGET_TOL_PCT,
+    }
+    m["failed_checks"] = [k for k, ok in checks.items() if not ok]
+    m["converged"] = not m["failed_checks"]
     m["status"] = "ok" if m["converged"] else "not_converged"
+    if not m["yplus_in_range"]:
+        print(f"  WARNING: average y+ {ya} is outside {YPLUS_RANGE}, adjust TARGET_YPLUS")
     write_json(job_directory, m)
     return m
 
@@ -487,8 +533,11 @@ def format_summary(m):
         "-" * 60,
         f"  mass flow target  :  {f('mdot_target_kg_s', '.4f')} kg/s",
         f"  mass flow out/in  :  {f('mdot_outlet_kg_s', '.4f')} / {f('mdot_inlet_kg_s', '.4f')} kg/s"
-        f"   (ratio {f('mdot_ratio', '.3f')})",
+        f"   (ratio {f('mdot_ratio', '.4f')})",
+        f"  back pressure     :  {f('p_back_avg_Pa', '.1f')} Pa   (osc {f('p_back_osc_pct', '.3f')} %)",
         "-" * 60,
+        f"  flow metrics from :  {'mean fields' if m.get('fields_averaged') else 'LAST ITERATION (no mean fields)'}"
+        f", iterations {f('avg_window_start', '.0f')} -> {f('avg_window_end', '.0f')}",
         f"  capture   Mach avg          :  {f('cap_mach_avg', '.4f')}",
         f"  engine    Mach avg / max    :  {f('ef_mach_avg', '.4f')} / {f('ef_mach_max', '.4f')}",
         f"  engine    T avg             :  {f('ef_T_avg', '.2f')} K",
@@ -499,11 +548,16 @@ def format_summary(m):
         f"  duct      p avg / max       :  {f('duct_p_avg', '.1f')} / {f('duct_p_max', '.1f')} Pa",
         f"  p0 recovery duct / total    :  {f('pt_recovery_duct', '.4f')} / {f('pt_recovery_total', '.4f')}",
         "-" * 60,
-        f"  mass flow drift   :  {f('mdot_drift_pct', '+.4f')} %",
-        f"  mass imbalance    :  {f('mass_imbalance_pct', '+.4f')} %",
-        f"  y+  avg / max     :  {f('yplus_avg', '.2f')} / {f('yplus_max', '.2f')}",
+        f"  mass flow drift   :  {f('mdot_drift_pct', '+.4f')} %   (tol {f('drift_tolerance_pct', '.2f')})",
+        f"  mass flow osc     :  {f('mdot_osc_pct', '.4f')} %   (tol {f('mdot_osc_tol_pct', '.2f')}, "
+        f"std {f('mdot_std_pct', '.4f')} %)",
+        f"  mass imbalance    :  {f('mass_imbalance_pct', '+.4f')} %   (tol {f('mass_imbalance_tol_pct', '.2f')})",
+        f"  y+  min/avg/max   :  {f('yplus_min', '.1f')} / {f('yplus_avg', '.1f')} / {f('yplus_max', '.1f')}"
+        f"   (target avg {YPLUS_RANGE[0]:g}-{YPLUS_RANGE[1]:g}"
+        f"{'' if m.get('yplus_in_range') else ', OUT OF RANGE'})",
         f"  mesh / solve time :  {f('mesh_time_s', '.1f')} / {f('solve_time_s', '.1f')} s",
-        bar, f"  CONVERGED: {m.get('converged')}", bar, "",
+        bar, f"  CONVERGED: {m.get('converged')}"
+        f"{'' if m.get('converged') else '   failed: ' + ', '.join(m.get('failed_checks') or [])}", bar, "",
     ])
 
 def plot_convergence(job_directory):
@@ -530,7 +584,7 @@ def plot_convergence(job_directory):
                         label=f"target {MDOT_TARGET:g} kg/s")
             plt.axvspan(t_cut, to[-1], color="0.6", alpha=0.25,
                         label=f"averaging window (last {100*metrics.TAIL_FRACTION:.0f}%)")
-            tail = out[to >= t_cut, 0]
+            tail = -inn[ti >= t_cut, 0]       # capture plane is the free signal, the outlet is imposed
             if len(tail) > 1:
                 lo = min(tail.min(), MDOT_TARGET); hi = max(tail.max(), MDOT_TARGET)
                 pad = max(0.5 * (hi - lo), 0.02 * hi)
@@ -609,16 +663,35 @@ def paraview_post(foam, images):
     case = os.path.dirname(os.path.abspath(foam))
     m = read_json(case) or {}
 
+    # Window-averaged fields from fieldAverage when the latest time has them, else the last iteration
+    time_dirs = [d for d in os.listdir(case) if os.path.isdir(os.path.join(case, d))
+                 and _is_float(d) and float(d) > 0]
+    latest = max(time_dirs, key=float) if time_dirs else None
+    averaged = latest is not None and all(
+        os.path.exists(os.path.join(case, latest, f)) for f in ("UMean", "pMean", "TMean"))
+    sfx = "Mean" if averaged else ""
+    U_, p_, T_ = f"U{sfx}", f"p{sfx}", f"T{sfx}"
+    if not averaged:
+        print("WARNING: no UMean/pMean/TMean in the latest time, using the last iteration")
+
     reader = OpenDataFile(foam)
     reader.MeshRegions = ["internalMesh"]
-    reader.CellArrays = ["p", "T", "U"]
+    reader.CellArrays = [p_, T_, U_]
     reader.UpdatePipelineInformation()
     times = reader.TimestepValues
     times = list(times) if hasattr(times, "__len__") else [times]
     t = times[-1] if times else 0.0
 
-    # Derived cell fields (perfect gas, same gamma / R as the 1D estimates)
+    # Copy the chosen fields to plain names so everything below is the same either way
     src = reader
+    if averaged:
+        for name, fn in [("p", p_), ("T", T_), ("U", U_)]:
+            src = Calculator(Input=src)
+            src.AttributeType = "Cell Data"
+            src.ResultArrayName = name
+            src.Function = fn
+
+    # Derived cell fields (perfect gas, same gamma / R as the 1D estimates)
     for name, fn in [
         ("Mach",    f"mag(U)/sqrt({GAMMA}*{R_GAS}*T)"),
         ("rho",     f"p/({R_GAS}*T)"),
@@ -699,6 +772,7 @@ def paraview_post(foam, images):
     if m.get("p0_inf_Pa"):
         stats["pt_recovery_total"] = stats["ef_p0_avg"] / m["p0_inf_Pa"]
     stats["post_time"] = t
+    stats["fields_averaged"] = averaged
 
     m.update(stats)
     write_json(case, m)

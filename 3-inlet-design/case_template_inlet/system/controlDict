@@ -59,6 +59,36 @@ functions
         operation       sum;
         fields          (phi);
     }
+    // Area-averaged static pressure at the outlet (the back pressure is now a result)
+    outletPressure
+    {
+        type            surfaceFieldValue;
+        libs            (fieldFunctionObjects);
+        writeControl    timeStep;
+        writeInterval   1;
+        log             false;
+        writeFields     false;
+        regionType      patch;
+        name            outlet;
+        operation       areaAverage;
+        fields          (p);
+    }
+    // Mean fields over the convergence window, used for all reported flow metrics
+    fieldAverage
+    {
+        type            fieldAverage;
+        libs            (fieldFunctionObjects);
+        timeStart       7200;           // start of the averaging window, set by run_inlet.py
+        writeControl    writeTime;
+        restartOnRestart false;
+        periodicRestart  false;
+        fields
+        (
+            U { mean on; prime2Mean off; base iteration; }
+            p { mean on; prime2Mean off; base iteration; }
+            T { mean on; prime2Mean off; base iteration; }
+        );
+    }
     MachNo
     {
         type            MachNo;

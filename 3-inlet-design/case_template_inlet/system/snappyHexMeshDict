@@ -102,13 +102,13 @@ addLayersControls
     {
         "(wall|extension)"
         {
-            nSurfaceLayers 5;
+            nSurfaceLayers 3;          // first layer ~0.7 mm for y+ 30-100, close to the 0.75-1.5 mm wall cells
         }
     }
 
     thicknessModel firstAndExpansion;
     firstLayerThickness 0.0002567;     // set by run_inlet.py
-    expansionRatio 1.2;
+    expansionRatio 1.15;
     minThickness 0.0001283;            // set by run_inlet.py
     nGrow 0;
     featureAngle 130;

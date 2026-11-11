@@ -27,8 +27,10 @@ boundaryField
     }
     outlet
     {
-        type            inletOutlet;
-        inletValue      uniform (0 0 0);
+        // Engine demand: fixed mass flow, ramped up from rest (table set by run_inlet.py)
+        type            flowRateOutletVelocity;
+        massFlowRate    table ((0 0.0527) (1500 0.2635));
+        rho             rho;
         value           uniform $UInit;
     }
     "(wall|extension)"

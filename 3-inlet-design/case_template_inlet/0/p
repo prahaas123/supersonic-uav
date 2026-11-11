@@ -32,9 +32,8 @@ boundaryField
     }
     outlet
     {
-        // Engine back pressure
-        type            fixedValue;
-        value           uniform $pOut;
+        // Back pressure is a result: the outlet U fixes the mass flow
+        type            zeroGradient;
     }
     "(wall|extension)"
     {
