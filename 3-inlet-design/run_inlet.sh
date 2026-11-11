@@ -1,0 +1,28 @@
+#!/bin/bash
+
+#SBATCH --job-name=inlet_run
+#SBATCH --account=def-jphickey
+#SBATCH --time=12:00:00
+#SBATCH --nodes=1
+#SBATCH --ntasks-per-node=50
+#SBATCH --cpus-per-task=1
+#SBATCH --mem=100G
+#SBATCH --output=inlet_run.log
+#SBATCH --open-mode=append
+
+module load StdEnv/2023
+module load gcc/12.3
+module load openmpi/4.1.5
+module load paraview/5.11.2
+module load python/3.11.5
+module load openfoam/v2312
+
+virtualenv --no-download $SLURM_TMPDIR/env
+source $SLURM_TMPDIR/env/bin/activate
+pip install --no-index --upgrade pip
+pip install --no-index numpy matplotlib
+
+export SQUEUE_FORMAT='%i","%j","%t","%M","%L","%D","%C","%m","%b","%R'
+
+# Optional argument: case directory (default ./inlet_baseline), e.g. sbatch run_inlet.sh ./inlet_LD55_AR15
+python3 run_inlet.py "$@"
