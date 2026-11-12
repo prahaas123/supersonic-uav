@@ -97,17 +97,19 @@
 
 ## 8. Chosen Design
 
-- Design 236: explain why
+- Design 543 has the lowest drag of the designs that meet every constraint.
+- Drag of 173.0 N (50 % of available thrust), lift of 209.6 N, trimmed CG at 0.362 MAC.
+
+![Design 543](0-results/design543/geometry-diagonal.png)
 
 ## 9. Next steps
 
-- Component placement (fuel tanks, engine, inlet) and a CG envelope with a valid static margin in both subsonic and supersonic flight.
-- 2D inlet geometry optimization, then a higher-fidelity OpenFOAM inlet case to confirm the inlet delivers the pressure and velocity the RDE needs.
+- Inlet geometry optimization, to confirm the inlet delivers the pressure and velocity the RDE needs.
+- Final aerodynamic surface design.
 - Checks on the final design:
-  - multiple mach numbers and an angle-of-attack sweep
+  - multiple mach numbers and AoAs
   - static margin from the Cm slope
-  - grid independence for the final geometry
-- Final structural CAD.
+- Component placement (fuel tanks, engine, inlet) and a CG envelope with a valid static margin in both subsonic and supersonic flight.
 
 ## Repository structure
 
@@ -117,4 +119,5 @@
 | [0-results/](0-results/) | figures, DSE results, trained surrogates and flow images |
 | [1-initial-sizing/](1-initial-sizing/) | weight estimate, constraint analysis and performance analysis |
 | [2-optimization/](2-optimization/) | low-resoltion supersonic case template, DSE driver, surrogates and optimizer |
-| [3-detail-design/](3-detail-design/) | higher-resolution subsonic & supersonic case templates |
+| [3-inlet-design/](3-detail-design/) | inlet design optimization based on RDE requirements |
+| [4-detail-design/](3-detail-design/) | higher-resolution subsonic & supersonic case templates |
