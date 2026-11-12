@@ -68,6 +68,9 @@ SLICE_STATIONS = (0.0, 0.25, 0.5, 0.75, 1.0)   # x/L of the front-view slices, c
 X_OFFSET   = 1e-4            # planes kept just inside the capture plane / downstream of the engine face
 Y_SLICE    = 1e-4            # side slice just off the y = 0 symmetry plane (avoids cell faces)
 VIEW_SIZE  = [3840, 1440]
+FRONT_VIEW_SIZE = [3840, 960]  # wide, short image for the row of front-view slices
+LABEL_FONT = 40
+LABEL_CHAR_W = 0.0046        # width of one label character / image width at LABEL_FONT, 3840 px wide
 SCALAR_BAR = {"position": [0.90, 0.05], "length": 0.90, "thickness": 48,
               "title_size": 48, "label_size": 40, "n_labels": 6}
 
@@ -683,9 +686,9 @@ def paraview_post(foam, images):
     # ---- images ----
     aspect = VIEW_SIZE[0] / VIEW_SIZE[1]
 
-    def view(position, focal, scale):
+    def view(position, focal, scale, size=VIEW_SIZE):
         rv = CreateView("RenderView")
-        rv.ViewSize = VIEW_SIZE
+        rv.ViewSize = size
         rv.ViewTime = t
         rv.OrientationAxesVisibility = 0
         rv.CameraPosition = position
@@ -717,9 +720,9 @@ def paraview_post(foam, images):
         bar.Title = title
         bar.ComponentTitle = ""
 
-    def save(rv, fname):
+    def save(rv, fname, size=VIEW_SIZE):
         Render(rv)
-        SaveScreenshot(os.path.join(images, fname), rv, ImageResolution=VIEW_SIZE)
+        SaveScreenshot(os.path.join(images, fname), rv, ImageResolution=size)
         Delete(rv)
 
     # Side view: y = 0 slice seen from -y, the slice fills the left ~85 %, colour bar on the right
@@ -746,7 +749,7 @@ def paraview_post(foam, images):
     bounds = [s.GetDataInformation().GetBounds() for _, _, s in stations]
     w_max = max(bb[3] - bb[2] for bb in bounds)
     h_max = max(bb[5] - bb[4] for bb in bounds)
-    pitch = 1.25 * w_max
+    pitch = 1.15 * w_max
     moved = []
     for i, ((f, x, s), bb) in enumerate(zip(stations, bounds)):
         tr = Transform(Input=s)
@@ -756,29 +759,34 @@ def paraview_post(foam, images):
         moved.append(tr)
     n = len(moved)
     row_w = (n - 1) * pitch + w_max
-    scale = max(0.5 * h_max / 0.6, row_w / (0.82 * 2.0 * aspect))
-    width = 2.0 * scale * aspect
-    y_focal = -0.5 * (n - 1) * pitch - 0.075 * width          # row centred in the left ~85 %
+    f_aspect = FRONT_VIEW_SIZE[0] / FRONT_VIEW_SIZE[1]
+    # sections fill the left ~82 % and at most ~55 % of the height (title above, labels below)
+    scale = max(0.5 * h_max / 0.55, row_w / (0.82 * 2.0 * f_aspect))
+    width = 2.0 * scale * f_aspect
+    y_focal = -0.5 * (n - 1) * pitch - 0.07 * width           # row centred left of the colour bar
+    z_focal = -0.02 * 2.0 * scale                             # sections slightly above centre
+    label_y = 0.52 - 0.5 * h_max / (2.0 * scale) - 0.04 - 1.6 * LABEL_FONT / FRONT_VIEW_SIZE[1]
 
     for array, title, fname in [("p", "p [Pa]", "slices-pressure-front.png"),
                                 ("p0", "p0 [Pa]", "slices-total-pressure-front.png")]:
         lo = min(s.CellData[array].GetRange()[0] for _, _, s in stations)
         hi = max(s.CellData[array].GetRange()[1] for _, _, s in stations)
-        rv = view([x_lip - 1.0, y_focal, 0.0], [x_lip, y_focal, 0.0], scale)
+        rv = view([x_lip - 1.0, y_focal, z_focal], [x_lip, y_focal, z_focal], scale, FRONT_VIEW_SIZE)
         for tr in moved:
             color(Show(tr, rv), rv, array, title, lo, hi)
         for i, f in enumerate(SLICE_STATIONS):
-            label = Text(Text=f"x/L = {f:g}")
-            ld = Show(label, rv)
+            text = f"x/L = {f:g}"
+            ld = Show(Text(Text=text), rv)
             ld.WindowLocation = "Any Location"
-            ld.FontSize = 40
-            # screen position of panel i: offset (y_focal - y_i) to the right of the centre
-            ld.Position = [0.5 + (y_focal + i * pitch) / width - 0.04, 0.5 - 0.5 * h_max / (2 * scale) - 0.12]
-        title_text = Text(Text="Looking downstream: capture plane (left) to engine face (right)")
-        td = Show(title_text, rv)
+            ld.FontSize = LABEL_FONT
+            # Position is the label's lower-left corner; section i sits (y_focal + i*pitch)/width
+            # right of the image centre, so shift left by half the label width to centre it.
+            x_c = 0.5 + (y_focal + i * pitch) / width
+            ld.Position = [x_c - 0.5 * LABEL_CHAR_W * len(text), label_y]
+        td = Show(Text(Text="Looking downstream: capture plane (left) to engine face (right)"), rv)
         td.WindowLocation = "Upper Center"
-        td.FontSize = 40
-        save(rv, fname)
+        td.FontSize = LABEL_FONT
+        save(rv, fname, FRONT_VIEW_SIZE)
 
 if __name__ == "__main__":
     if len(sys.argv) >= 2 and sys.argv[1] == "post":
