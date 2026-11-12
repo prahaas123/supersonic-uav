@@ -36,8 +36,8 @@ solvers
 SIMPLE
 {
     nNonOrthogonalCorrectors 1;
-    consistent      no;           // classic SIMPLE, SIMPLEC with p relaxation 1 diverged at start-up
-    transonic       no;           // subsonic diffuser, switch on if the capture plane chokes
+    consistent      no;           // set by run_inlet.py (SOLVER_VARIANTS)
+    transonic       no;           // set by run_inlet.py (SOLVER_VARIANTS), yes uses div(phid,p)
     pMinFactor      0.5;
     pMaxFactor      1.5;
 
@@ -52,6 +52,7 @@ SIMPLE
 
 relaxationFactors
 {
+    // p, rho, U and e are set by run_inlet.py (SOLVER_VARIANTS)
     fields
     {
         p               0.3;
@@ -59,7 +60,7 @@ relaxationFactors
     }
     equations
     {
-        U               0.5;          // 0.7 settled into a limit cycle after ~1200 iterations
+        U               0.5;
         e               0.7;
         "(k|omega)"     0.7;
     }
