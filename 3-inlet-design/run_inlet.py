@@ -16,7 +16,9 @@ ALTITUDE_M     = 15000.0     # [m]
 MACH           = 1.5
 PT_RECOVERY_2D = 0.94        # total pressure recovery of the 2D external compression (2d-inlet-designs.csv)
 MDOT_TARGET    = 0.2635      # RDE air mass flow [kg/s] (README, section 1)
-ETA_DUCT_EST   = 0.96        # assumed S-duct p0 recovery, only sets the outlet p (first baseline: 0.959)
+ETA_DUCT_EST   = 0.92        # assumed S-duct p0 recovery, sets the outlet p and so the mass flow
+                             # (0.92 from inlet_baseline, mass-flow BC run, not converged).
+                             # If the run misses MDOT_TARGET, set this to the reported duct recovery and rerun.
 
 # Run settings
 NP             = 50          # MPI processes
@@ -28,13 +30,14 @@ YPLUS_RANGE    = (30.0, 100.0)  # wall-function range, average y+ outside it is 
 EXT_LENGTH_D   = 1.5         # straight extension after the engine face [engine-face diameters]
 N_EXT          = 13          # axial stations on the extension
 TURB_INTENSITY = 0.05        # at the capture plane, behind the shock system
-RAMP_ITERS     = 1500        # inlet mass flow ramps from 20 % to MDOT_TARGET over these iterations (fixed schedule)
+RAMP_ITERS     = 1500        # outlet p ramps from P_START_FRAC of the way down to p_back over these iterations
+P_START_FRAC   = 0.2         # start the back pressure at p0_capture - 0.2 * (p0_capture - p_back)
 
 # Convergence (iterative) checks, evaluated over the averaging window
 MASS_IMBALANCE_TOL_PCT = 0.5 # |inlet - outlet| mass flow
-MDOT_OSC_TOL_PCT       = 0.2 # outlet mass flow half peak-to-peak / mean (the inlet one is imposed)
+MDOT_OSC_TOL_PCT       = 0.2 # outlet mass flow half peak-to-peak / mean
 P_CAP_OSC_TOL_PCT      = 0.2 # capture-plane static pressure half peak-to-peak / mean
-MDOT_TARGET_TOL_PCT    = 0.5 # |mean outlet mass flow / MDOT_TARGET - 1|
+MDOT_TARGET_TOL_PCT    = 0.5 # |mean outlet mass flow / MDOT_TARGET - 1|, reported, not a convergence check
 CONT_ERR_TOL           = 1e-3  # mean "sum local" continuity error over the window
 # Physical checks, evaluated on the averaged fields
 T0_MARGIN_K            = 1.0 # duct T max may not exceed T0 by more than this (adiabatic duct)
@@ -179,7 +182,8 @@ def flow_conditions(params):
     a_cap = a_ef / params["AR"]          # ellipse, W0 * H0 = D_EF^2 / AR
 
     # Engine face: target mass flow at the capture p0 less an assumed duct loss. The outlet p is
-    # fixed to this static pressure; the capture p0 then comes out of the solution near p0c.
+    # fixed to this static pressure and the capture p0 is imposed, so the mass flow comes out of
+    # the solution; it matches MDOT_TARGET when ETA_DUCT_EST equals the actual duct recovery.
     p0ef = ETA_DUCT_EST * p0c
     m_ef = subsonic_mach(MDOT_TARGET, a_ef, p0ef, T0)
     if m_ef is None:
@@ -360,15 +364,17 @@ def prepare(job_directory, params):
             raise ValueError("RAMP_ITERS must end before the averaging window")
         _sub(cd, r"^(\s*)timeStart\s+[^;\n]+;", rf"\g<1>timeStart       {avg_start};")
 
-        # Inlet mass flow: fixed schedule, 20 % of the target ramped to the target, then held
-        _sub(os.path.join(job_directory, "0", "U"), r"^(\s*)massFlowRate\s+[^;\n]+;",
-             rf"\g<1>massFlowRate    table ((0 {0.2 * MDOT_TARGET:.6g}) ({RAMP_ITERS} {MDOT_TARGET:.6g}));")
+        # Outlet back pressure: fixed schedule, from just below the capture p0 down to p_back, then held
+        p_start = flow["p0_capture_Pa"] - P_START_FRAC * (flow["p0_capture_Pa"] - flow["p_back_Pa"])
+        _sub(os.path.join(job_directory, "0", "p"), r"^(\s*)uniformValue\s+[^;\n]+;",
+             rf"\g<1>uniformValue    table ((0 {p_start:.6g}) ({RAMP_ITERS} {flow['p_back_Pa']:.6g}));")
 
         # Boundary / initial values
         with open(os.path.join(job_directory, "0", "include", "initialConditions"), "w") as f:
             f.write(f"p0In        {flow['p0_capture_Pa']:.6g};\n")
             f.write(f"T0In        {flow['T0_K']:.6g};\n")
             f.write(f"pOut        {flow['p_back_Pa']:.6g};\n")
+            f.write(f"pInit       {p_start:.6g};\n")
             f.write(f"TInit       {flow['T_ef_1d_K']:.6g};\n")
             f.write(f"UInit       ({flow['U_ef_1d']:.6g} 0 0);\n")
             f.write(f"kInit       {flow['k_init']:.6g};\n")
@@ -376,10 +382,11 @@ def prepare(job_directory, params):
             f.write(f"turbIntensity {TURB_INTENSITY:.6g};\n")
             f.write(f"mixingLength  {flow['mixing_length_m']:.6g};\n")
 
-        print(f"  inlet mass flow {MDOT_TARGET:g} kg/s (ramped over {RAMP_ITERS} it) | "
+        print(f"  back pressure {p_start:.0f} -> {flow['p_back_Pa']:.0f} Pa (ramped over {RAMP_ITERS} it) | "
               f"fields averaged from iteration {avg_start}")
-        print(f"  p0 capture (expected) {flow['p0_capture_Pa']:.0f} Pa | T0 {flow['T0_K']:.2f} K | "
-              f"p back (fixed, eta_duct {ETA_DUCT_EST:g}) {flow['p_back_Pa']:.0f} Pa | 1D Mach capture "
+        print(f"  p0 capture (imposed) {flow['p0_capture_Pa']:.0f} Pa | T0 {flow['T0_K']:.2f} K | "
+              f"p back (eta_duct {ETA_DUCT_EST:g}) {flow['p_back_Pa']:.0f} Pa | target {MDOT_TARGET:g} kg/s | "
+              f"1D Mach capture "
               f"{flow['mach_capture_1d'] if flow['mach_capture_1d'] is None else round(flow['mach_capture_1d'], 3)}"
               f" / engine face {flow['mach_engine_face_1d']:.3f}")
 
@@ -387,7 +394,7 @@ def prepare(job_directory, params):
                 "duct_length_m": L, "x_lip_m": bi.X_LIP, "x_engine_face_m": x_ef,
                 "x_outlet_m": x_out, "extension_length_m": x_out - x_ef,
                 "first_layer_m": y1, "target_yplus": TARGET_YPLUS, "base_cell_m": BASE_CELL,
-                "ramp_iters": RAMP_ITERS, "avg_start_iter": avg_start}
+                "ramp_iters": RAMP_ITERS, "p_back_start_Pa": p_start, "avg_start_iter": avg_start}
     except Exception as e:
         print(f"Exception during preparation: {e}")
         return None
@@ -495,8 +502,8 @@ def convergence_metrics(job_directory, extra):
         write_json(job_directory, m)
         return m
 
-    # The inlet mass flow is imposed, so the outlet mass flow and the capture pressure are the
-    # free (convergence) signals
+    # The capture p0 and the back pressure are imposed, so the mass flow and the capture static
+    # pressure are the free (convergence) signals
     m["mdot_outlet_kg_s"]   = so["value"]
     m["mdot_inlet_kg_s"]    = si["value"]
     m["mdot_drift_pct"]     = so["drift_pct"]
@@ -528,12 +535,13 @@ def convergence_metrics(job_directory, extra):
         "p_cap_drift":      pdrift is not None and abs(pdrift) < metrics.DRIFT_TOLERANCE_PCT,
         "p_cap_oscillation": posc is not None and posc < P_CAP_OSC_TOL_PCT,
         "imbalance":        abs(imb) < MASS_IMBALANCE_TOL_PCT,
-        "mdot_target":      abs(m["mdot_ratio"] - 1.0) * 100.0 < MDOT_TARGET_TOL_PCT,
         "continuity":       cerr is not None and cerr < CONT_ERR_TOL,
     }
     m["failed_checks"] = [k for k, ok in checks.items() if not ok]
     m["converged"] = not m["failed_checks"]
     m["status"] = "ok" if m["converged"] else "not_converged"
+    # Mass flow is a result of the imposed pressures: flagged, not a convergence failure
+    m["mdot_on_target"] = abs(m["mdot_ratio"] - 1.0) * 100.0 < MDOT_TARGET_TOL_PCT
     if not m["yplus_in_range"]:
         print(f"  WARNING: average y+ {ya} is outside {YPLUS_RANGE}, adjust TARGET_YPLUS")
     write_json(job_directory, m)
@@ -574,10 +582,17 @@ def physical_checks(job_directory, m):
     m["status"] = "ok" if m["converged"] else "not_converged"
 
     if m.get("cap_p0_avg") and m.get("p0_capture_Pa"):
+        # The capture p0 is imposed now, so this is only a sanity check of the measurement plane
         m["p0_cap_dev_pct"] = 100.0 * (m["cap_p0_avg"] / m["p0_capture_Pa"] - 1.0)
         if abs(m["p0_cap_dev_pct"]) > P0_CAP_DEV_WARN_PCT:
-            print(f"  WARNING: capture p0 is {m['p0_cap_dev_pct']:+.1f} % from the intended "
-                  f"{m['p0_capture_Pa']:.0f} Pa, ETA_DUCT_EST ({ETA_DUCT_EST}) is off for this design")
+            print(f"  WARNING: capture p0 is {m['p0_cap_dev_pct']:+.1f} % from the imposed "
+                  f"{m['p0_capture_Pa']:.0f} Pa, check the capture measurement plane")
+
+    if m.get("mdot_ratio") is not None and not m.get("mdot_on_target"):
+        hint = (f", try ETA_DUCT_EST = {m['pt_recovery_duct']:.4f} (the duct recovery of this run)"
+                if m.get("pt_recovery_duct") is not None else "")
+        print(f"  WARNING: mass flow is {100.0 * (m['mdot_ratio'] - 1.0):+.2f} % from the target "
+              f"{MDOT_TARGET:g} kg/s with ETA_DUCT_EST = {ETA_DUCT_EST}{hint}")
     write_json(job_directory, m)
     return m
 
@@ -594,9 +609,9 @@ def format_summary(m):
         "-" * 60,
         f"  mass flow target  :  {f('mdot_target_kg_s', '.4f')} kg/s",
         f"  mass flow out/in  :  {f('mdot_outlet_kg_s', '.4f')} / {f('mdot_inlet_kg_s', '.4f')} kg/s"
-        f"   (ratio {f('mdot_ratio', '.4f')})",
+        f"   (ratio {f('mdot_ratio', '.4f')}{'' if m.get('mdot_on_target') else ', OFF TARGET'})",
         f"  back pressure     :  {f('p_back_Pa', '.1f')} Pa   (fixed, eta_duct est {f('eta_duct_est', '.3f')})",
-        f"  capture p0        :  {f('cap_p0_avg', '.1f')} Pa   (intended {f('p0_capture_Pa', '.1f')}, "
+        f"  capture p0        :  {f('cap_p0_avg', '.1f')} Pa   (imposed {f('p0_capture_Pa', '.1f')}, "
         f"{f('p0_cap_dev_pct', '+.2f')} %)",
         "-" * 60,
         f"  flow metrics from :  {'mean fields' if m.get('fields_averaged') else 'LAST ITERATION (no mean fields)'}"
@@ -650,7 +665,7 @@ def plot_convergence(job_directory):
                         label=f"target {MDOT_TARGET:g} kg/s")
             plt.axvspan(t_cut, to[-1], color="0.6", alpha=0.25,
                         label=f"averaging window (last {100*metrics.TAIL_FRACTION:.0f}%)")
-            tail = out[to >= t_cut, 0]        # outlet is the free signal, the inlet is imposed
+            tail = out[to >= t_cut, 0]
             if len(tail) > 1:
                 lo = min(tail.min(), MDOT_TARGET); hi = max(tail.max(), MDOT_TARGET)
                 pad = max(0.5 * (hi - lo), 0.02 * hi)

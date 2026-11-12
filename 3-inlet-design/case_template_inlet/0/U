@@ -22,14 +22,11 @@ boundaryField
 {
     inlet
     {
-        // Engine demand imposed at the capture plane, ramped up from rest (table set by run_inlet.py).
-        // Velocity in + pressure out is well posed; a velocity outlet with zeroGradient p was not.
-        type            flowRateInletVelocity;
-        massFlowRate    table ((0 0.0527) (1500 0.2635));
-        rho             rho;
-        rhoInlet        0.5;            // only used before rho exists on the patch
-        extrapolateProfile no;
-        value           uniform $UInit;
+        // Velocity follows from the total pressure at the capture plane and the outlet back pressure.
+        // An imposed mass flow here (flowRateInletVelocity + zeroGradient p) fell into a limit cycle
+        // at full mass flow (inlet_baseline, Nov 2026).
+        type            pressureInletOutletVelocity;
+        value           uniform (0 0 0);
     }
     outlet
     {

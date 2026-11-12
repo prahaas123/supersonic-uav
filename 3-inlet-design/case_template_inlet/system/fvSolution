@@ -36,10 +36,7 @@ solvers
 SIMPLE
 {
     nNonOrthogonalCorrectors 1;
-    // SIMPLEC with the compressible (transonic) p equation, as in the stock rhoSimpleFoam duct
-    // tutorials with the same mass-flow-in / fixed-p-out setup. Classic SIMPLE (transonic no,
-    // p 0.3) went unstable once the ramp reached full mass flow; the capture plane runs at
-    // M ~0.6 (1D) and higher locally, where the incompressible-style p equation struggles.
+    // SIMPLEC with the compressible (transonic) p equation; the capture plane runs at M ~0.55-0.6.
     consistent      yes;
     transonic       yes;
     pMinFactor      0.5;

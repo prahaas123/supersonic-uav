@@ -16,20 +16,28 @@ FoamFile
 
 #include        "include/initialConditions"
 dimensions      [1 -1 -2 0 0 0 0];
-internalField   uniform $pOut;
+internalField   uniform $pInit;
 
 boundaryField
 {
     inlet
     {
-        // Capture total pressure is a result: U fixes the mass flow here
-        type            zeroGradient;
+        // Isentropic total pressure behind the 2D external compression
+        type            totalPressure;
+        p0              uniform $p0In;
+        rho             none;
+        psi             thermo:psi;
+        gamma           1.4;
+        value           uniform $p0In;
     }
     outlet
     {
-        // Engine back pressure, 1D estimate with an assumed duct recovery (set by run_inlet.py)
-        type            fixedValue;
-        value           uniform $pOut;
+        // Engine back pressure, 1D estimate with an assumed duct recovery (ETA_DUCT_EST).
+        // Ramped down from just below p0In so the flow starts gently (table set by run_inlet.py).
+        // The mass flow is a result: tune ETA_DUCT_EST until it matches the engine demand.
+        type            uniformFixedValue;
+        uniformValue    table ((0 40548) (1500 36483));
+        value           uniform $pInit;
     }
     "(wall|extension)"
     {
