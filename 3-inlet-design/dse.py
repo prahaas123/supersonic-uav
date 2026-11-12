@@ -42,7 +42,9 @@ OUTPUTS = [
     "duct_length_m", "wetted_area_m2", "capture_area_m2",
     # run quality
     "status", "converged", "failed_checks", "iterations", "mass_imbalance_pct", "cont_err_avg",
-    "yplus_min", "yplus_avg", "yplus_max", "solve_time_s",
+    "yplus_min", "yplus_avg", "yplus_max",
+    "duct_T_max", "duct_T_pctl", "duct_T_hot_frac",   # T_above_T0 check (duct_T_pctl at run_inlet.T_PERCENTILE)
+    "solve_time_s",
 ]
 
 def case_dir(design_id):

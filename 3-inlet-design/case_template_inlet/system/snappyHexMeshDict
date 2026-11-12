@@ -97,19 +97,21 @@ snapControls
 
 addLayersControls
 {
-    relativeSizes false;
+    // Thicknesses relative to the local wall cell, so the layers stay in proportion on the level 3
+    // (0.75 mm) wall cells at corners and curvature instead of shrinking away there
+    relativeSizes true;
     layers
     {
         "(wall|extension)"
         {
-            nSurfaceLayers 3;          // first layer ~0.7 mm for y+ 30-100, close to the 0.75-1.5 mm wall cells
+            nSurfaceLayers 3;          // first layer ~0.46 of the wall cell (~0.7 mm on 1.5 mm cells, y+ ~40)
         }
     }
 
     thicknessModel firstAndExpansion;
-    firstLayerThickness 0.0002567;     // set by run_inlet.py
+    firstLayerThickness 0.46;          // set by run_inlet.py, fraction of the local wall cell
     expansionRatio 1.15;
-    minThickness 0.0001283;            // set by run_inlet.py
+    minThickness 0.23;                 // set by run_inlet.py, fraction of the local wall cell
     nGrow 0;
     featureAngle 130;
     slipFeatureAngle 30;
@@ -118,7 +120,7 @@ addLayersControls
     nSmoothNormals 3;
     nSmoothThickness 10;
     maxFaceThicknessRatio 0.5;
-    maxThicknessToMedialRatio 0.3;
+    maxThicknessToMedialRatio 0.5;     // was 0.3, which cut the layers back in the corners of wide (high W/H) ducts
     minMedialAxisAngle 90;
     nBufferCellsNoExtrude 0;
     nLayerIter 50;

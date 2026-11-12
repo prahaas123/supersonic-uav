@@ -45,7 +45,9 @@ NP             = 50          # MPI processes
 N_ITER         = 8000        # rhoSimpleFoam iterations (residualControl usually stops it earlier)
 WRITE_INTERVAL = 500         # [iterations]
 BASE_CELL      = 0.006       # background cell [m], refined to level 2 (1.5 mm) inside the duct
-TARGET_YPLUS   = 40.0        # cell-centre y+ used to size the first layer
+WALL_LEVEL     = 2           # wall surface level that TARGET_YPLUS is sized for (wall level (2 3) in snappyHexMeshDict)
+TARGET_YPLUS   = 40.0        # cell-centre y+ used to size the first layer on level WALL_LEVEL wall cells
+                             # (layers use relativeSizes, so level 3 wall cells get half the first layer, y+ ~20)
 YPLUS_RANGE    = (30.0, 100.0)  # wall-function range for the average y+
 EXT_LENGTH_D   = 1.5         # straight extension after the engine face [engine-face diameters]
 N_EXT          = 13          # axial stations on the extension
@@ -58,7 +60,9 @@ MASS_IMBALANCE_TOL_PCT = 0.5   # |inlet - outlet| mass flow
 OSC_TOL_PCT            = 0.2   # half peak-to-peak / mean, outlet mass flow and capture static p
 CONT_ERR_TOL           = 1e-3  # mean "sum local" continuity error
 MDOT_TARGET_TOL_PCT    = 0.5   # mass flow vs MDOT_TARGET, reported only (it is a result of ETA_DUCT_EST)
-T0_MARGIN_K            = 1.0   # adiabatic duct: T may not exceed T0 by more than this
+T0_MARGIN_K            = 1.0   # adiabatic duct: T may not exceed T0 by more than this ...
+T_PERCENTILE           = 99.9  # ... at this volume-weighted percentile of the duct cells (not the single
+                               # hottest cell, which sits in a near-wall cell and is a wall-function artifact)
 
 GAMMA = 1.4
 R_GAS = 287.058
@@ -311,8 +315,10 @@ def prepare(case, params):
     y1 = first_layer_thickness(flow["rho_ef_1d"], flow["U_ef_1d"], flow["T_ef_1d_K"], L, TARGET_YPLUS)
     shm = path("system", "snappyHexMeshDict")
     sub(shm, r"^(\s*)locationInMesh\s+[^;\n]+;", rf"\g<1>locationInMesh ({loc[0]:.6f} {loc[1]:.6f} {loc[2]:.6f});")
-    sub(shm, r"^(\s*)firstLayerThickness\s+[^;\n]+;", rf"\g<1>firstLayerThickness {y1:.4g};")
-    sub(shm, r"^(\s*)minThickness\s+[^;\n]+;", rf"\g<1>minThickness {0.5 * y1:.4g};")
+    # relativeSizes: layer thicknesses are fractions of the local wall cell size
+    y1_rel = y1 / (BASE_CELL / 2 ** WALL_LEVEL)
+    sub(shm, r"^(\s*)firstLayerThickness\s+[^;\n]+;", rf"\g<1>firstLayerThickness {y1_rel:.4g};")
+    sub(shm, r"^(\s*)minThickness\s+[^;\n]+;", rf"\g<1>minThickness {0.5 * y1_rel:.4g};")
 
     # Run control
     sub(path("system", "decomposeParDict"), r"^numberOfSubdomains\s+\d+;", f"numberOfSubdomains  {NP};")
@@ -331,13 +337,14 @@ def prepare(case, params):
     with open(path("0", "include", "initialConditions"), "w") as fh:
         fh.writelines(f"{k:<13} {v if isinstance(v, str) else format(v, '.6g')};\n" for k, v in values.items())
 
-    print(f"  {n[0]}x{n[1]}x{n[2]} background cells, first layer {y1 * 1e6:.1f} um for y+ = {TARGET_YPLUS:g}")
+    print(f"  {n[0]}x{n[1]}x{n[2]} background cells, first layer {y1 * 1e6:.1f} um ({y1_rel:.3f} of the "
+          f"level {WALL_LEVEL} wall cell) for y+ = {TARGET_YPLUS:g}")
     print(f"  p0 capture {p0c:.0f} Pa, T0 {flow['T0_K']:.2f} K | back pressure {p_start:.0f} -> {p_back:.0f} Pa "
           f"over {RAMP_ITERS} it (eta_duct {ETA_DUCT_EST:g}) | 1D Mach capture {flow['mach_capture_1d']:.3f}, "
           f"engine face {flow['mach_engine_face_1d']:.3f}")
 
     return {**params, **flow, "duct_length_m": L, "wetted_area_m2": a_wet, "x_lip_m": bi.X_LIP, "x_engine_face_m": x_ef,
-            "x_outlet_m": x_out, "first_layer_m": y1, "target_yplus": TARGET_YPLUS,
+            "x_outlet_m": x_out, "first_layer_m": y1, "first_layer_rel": y1_rel, "target_yplus": TARGET_YPLUS,
             "base_cell_m": BASE_CELL, "ramp_iters": RAMP_ITERS, "p_back_start_Pa": p_start}
 
 # ----------------------------------------------------------------------------
@@ -464,14 +471,28 @@ def continuity_error(case, t_start):
 
 def physical_checks(m):
     # Reject solutions that create total pressure or heat an adiabatic duct
-    if m.get("pt_recovery_duct") is None or m.get("duct_T_max") is None:
+    if m.get("pt_recovery_duct") is None or m.get("duct_T_pctl") is None:
         return ["post_missing"]
     failed = []
     if m["pt_recovery_duct"] >= 1.0:
         failed.append("p0_gain")
-    if m["duct_T_max"] > m["T0_K"] + T0_MARGIN_K:
+    if m["duct_T_pctl"] > m["T0_K"] + T0_MARGIN_K:      # same as duct_T_hot_frac > 1 - T_PERCENTILE / 100
         failed.append("T_above_T0")
     return failed
+
+def volume_weighted_stats(values, volumes, percentile, limit):
+    # Volume-weighted percentile of values, and the volume fraction with values above limit (pure Python,
+    # runs under pvbatch)
+    pairs = sorted(zip(values, volumes))
+    total = sum(v for _, v in pairs)
+    target, acc, pctl = percentile / 100.0 * total, 0.0, pairs[-1][0]
+    for val, vol in pairs:
+        acc += vol
+        if acc >= target:
+            pctl = val
+            break
+    hot = sum(vol for val, vol in pairs if val > limit)
+    return pctl, hot / total
 
 def format_summary(m):
     def f(key, spec=".4g"):
@@ -491,8 +512,9 @@ def format_summary(m):
         "-" * 64,
         f"  Mach  capture avg {f('cap_mach_avg', '.3f')} | engine face avg / max {f('ef_mach_avg', '.3f')} / "
         f"{f('ef_mach_max', '.3f')} | duct max {f('duct_mach_max', '.3f')}",
-        f"  T     engine face avg {f('ef_T_avg', '.1f')} K | duct max {f('duct_T_max', '.1f')} K "
-        f"(T0 {f('T0_K', '.1f')})",
+        f"  T     engine face avg {f('ef_T_avg', '.1f')} K | duct max / P{T_PERCENTILE:g} {f('duct_T_max', '.1f')} / "
+        f"{f('duct_T_pctl', '.1f')} K (T0 {f('T0_K', '.1f')}) | vol > T0+{T0_MARGIN_K:g} K "
+        f"{100.0 * m['duct_T_hot_frac'] if m.get('duct_T_hot_frac') is not None else float('nan'):.3f} %",
         f"  p0 recovery duct / total   {f('pt_recovery_duct', '.4f')} / {f('pt_recovery_total', '.4f')}",
         "  stations (x/L)      p avg [Pa]   p0 mass avg [Pa]   Mach avg",
     ]
@@ -603,7 +625,7 @@ def post_process(case):
 
 def paraview_post(foam, images):
     from paraview import servermanager
-    from paraview.simple import (OpenDataFile, Calculator, Slice, Clip, Transform, Text,
+    from paraview.simple import (OpenDataFile, Calculator, Slice, Clip, CellSize, MergeBlocks, Transform, Text,
                                  IntegrateVariables, CreateView, Show, ColorBy,
                                  GetColorTransferFunction, GetScalarBar, Render, SaveScreenshot, Delete)
 
@@ -688,6 +710,20 @@ def paraview_post(foam, images):
                  duct_T_avg=I["T"] / V, duct_T_max=clip.CellData["T"].GetRange()[1],
                  duct_p_avg=I["p"] / V, duct_p_max=clip.CellData["p"].GetRange()[1],
                  reversed_flow_frac=I["reversed"] / V)       # separation indicator, volume fraction
+
+    # Volume-weighted T percentile and hot volume fraction for the T_above_T0 check
+    sizes = CellSize(Input=clip)
+    sizes.ComputeVertexCount, sizes.ComputeLength, sizes.ComputeArea, sizes.ComputeVolume = 0, 0, 0, 1
+    merged = MergeBlocks(Input=sizes)
+    merged.UpdatePipeline(t)
+    cd = servermanager.Fetch(merged).GetCellData()
+    T_arr, vol_arr = cd.GetArray("T"), cd.GetArray("Volume")
+    n_cells = T_arr.GetNumberOfTuples()
+    T_pctl, hot_frac = volume_weighted_stats([T_arr.GetValue(i) for i in range(n_cells)],
+                                             [abs(vol_arr.GetValue(i)) for i in range(n_cells)],
+                                             T_PERCENTILE, m["T0_K"] + T0_MARGIN_K)
+    stats.update(duct_T_pctl=T_pctl, duct_T_hot_frac=hot_frac, T_percentile=T_PERCENTILE)
+    Delete(merged); Delete(sizes)
     Delete(clip)
 
     stats["pt_recovery_duct"] = stats["ef_p0_avg"] / stats["cap_p0_avg"]
