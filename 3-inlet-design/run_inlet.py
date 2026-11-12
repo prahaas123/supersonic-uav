@@ -40,16 +40,6 @@ CONT_ERR_TOL           = 1e-3  # mean "sum local" continuity error over the wind
 T0_MARGIN_K            = 1.0 # duct T max may not exceed T0 by more than this (adiabatic duct)
 P0_CAP_DEV_WARN_PCT    = 5.0 # warn when the capture p0 is this far from p0_capture (assumed ETA_DUCT_EST)
 
-# Pressure-velocity coupling, fixed for the whole run and written to system/fvSolution.
-# "baseline" is the setup that went unstable at full mass flow; T1-T3 are the stability study.
-SOLVER_VARIANTS = {
-    "baseline": dict(transonic="no",  consistent="no",  p=0.3, rho=0.05, U=0.5, e=0.7),
-    "T1":       dict(transonic="yes", consistent="no",  p=0.3, rho=0.05, U=0.5, e=0.7),
-    "T2":       dict(transonic="yes", consistent="no",  p=0.3, rho=1.0,  U=0.5, e=0.7),
-    "T3":       dict(transonic="yes", consistent="yes", p=1.0, rho=0.05, U=0.7, e=0.7),
-}
-DEFAULT_SOLVER = "baseline"
-
 GAMMA = 1.4
 R_GAS = 287.058
 
@@ -70,29 +60,24 @@ SCALAR_BAR = {"position": [0.90, 0.05], "length": 0.90, "thickness": 48,
               "title_size": 48, "label_size": 40, "n_labels": 6}
 
 def main():
-    # usage: python3 run_inlet.py [case_dir] [solver_variant]
+    # usage: python3 run_inlet.py [case_dir]
     job_directory = sys.argv[1] if len(sys.argv) > 1 else "./inlet_baseline"
-    solver = sys.argv[2] if len(sys.argv) > 2 else DEFAULT_SOLVER
-    if solver not in SOLVER_VARIANTS:
-        print(f"Unknown solver variant {solver!r}, choose from {list(SOLVER_VARIANTS)}")
-        return 1
-    results = design_point(INLET_PARAMS, job_directory, solver)
+    results = design_point(INLET_PARAMS, job_directory)
     if results is None:
         print("Run did not produce metrics.")
         return 1
     return 0 if results.get("converged") else 2
 
-def design_point(params, job_directory, solver=DEFAULT_SOLVER):
+def design_point(params, job_directory):
     job_id = os.path.basename(os.path.normpath(job_directory))
     print(f"\n{'='*40}")
     print(f"Starting Simulation: {job_id}")
     print(f"  {params}")
-    print(f"  solver variant {solver}: {SOLVER_VARIANTS[solver]}")
     print(f"{'='*40}")
 
     # 1. Prepare
     print("[1/6] Preparing case, S-duct STL and boundary conditions...")
-    refs = prepare(job_directory, params, solver)
+    refs = prepare(job_directory, params)
     if refs is None or "status" in refs:
         status = refs["status"] if refs else "prepare_failed"
         print(f"Error: {status} for {job_id}.")
@@ -303,17 +288,7 @@ def _sub(path, pattern, repl, flags=re.M):
     with open(path, "w") as fh:
         fh.write(text)
 
-def set_solver(job_directory, solver):
-    s = SOLVER_VARIANTS[solver]
-    fvs = os.path.join(job_directory, "system", "fvSolution")
-    _sub(fvs, r"^(\s*)consistent\s+[^;\n]+;", rf"\g<1>consistent      {s['consistent']};")
-    _sub(fvs, r"^(\s*)transonic\s+[^;\n]+;",  rf"\g<1>transonic       {s['transonic']};")
-    _sub(fvs, r"(fields\s*\{\s*p\s+)[^;\n]+;",   rf"\g<1>{s['p']:g};",   flags=re.S)
-    _sub(fvs, r"(fields\s*\{[^}]*?\brho\s+)[^;\n]+;", rf"\g<1>{s['rho']:g};", flags=re.S)
-    _sub(fvs, r"(equations\s*\{\s*U\s+)[^;\n]+;",  rf"\g<1>{s['U']:g};",  flags=re.S)
-    _sub(fvs, r"(equations\s*\{[^}]*?\be\s+)[^;\n]+;", rf"\g<1>{s['e']:g};", flags=re.S)
-
-def prepare(job_directory, params, solver=DEFAULT_SOLVER):
+def prepare(job_directory, params):
     sys.path.insert(0, SCRIPT_DIR)
     import numpy as np
     import build_inlet as bi
@@ -385,9 +360,6 @@ def prepare(job_directory, params, solver=DEFAULT_SOLVER):
             raise ValueError("RAMP_ITERS must end before the averaging window")
         _sub(cd, r"^(\s*)timeStart\s+[^;\n]+;", rf"\g<1>timeStart       {avg_start};")
 
-        # Pressure-velocity coupling for this run
-        set_solver(job_directory, solver)
-
         # Inlet mass flow: fixed schedule, 20 % of the target ramped to the target, then held
         _sub(os.path.join(job_directory, "0", "U"), r"^(\s*)massFlowRate\s+[^;\n]+;",
              rf"\g<1>massFlowRate    table ((0 {0.2 * MDOT_TARGET:.6g}) ({RAMP_ITERS} {MDOT_TARGET:.6g}));")
@@ -415,9 +387,7 @@ def prepare(job_directory, params, solver=DEFAULT_SOLVER):
                 "duct_length_m": L, "x_lip_m": bi.X_LIP, "x_engine_face_m": x_ef,
                 "x_outlet_m": x_out, "extension_length_m": x_out - x_ef,
                 "first_layer_m": y1, "target_yplus": TARGET_YPLUS, "base_cell_m": BASE_CELL,
-                "ramp_iters": RAMP_ITERS, "avg_start_iter": avg_start,
-                "solver_variant": solver,
-                **{f"solver_{k}": v for k, v in SOLVER_VARIANTS[solver].items()}}
+                "ramp_iters": RAMP_ITERS, "avg_start_iter": avg_start}
     except Exception as e:
         print(f"Exception during preparation: {e}")
         return None
@@ -620,9 +590,7 @@ def format_summary(m):
     return "\n".join([
         "", bar, f" INLET METRICS   [{m.get('status', '?')}]", bar,
         f"  LD {f('LD')} | AR {f('AR')} | WH {f('WH')} | c_cl {f('c_cl')} | c_area {f('c_area')}",
-        f"  iterations        :  {f('iterations', 'd')}   solver {m.get('solver_variant', 'n/a')} "
-        f"(transonic {m.get('solver_transonic')}, consistent {m.get('solver_consistent')}, "
-        f"relax p {m.get('solver_p')} rho {m.get('solver_rho')} U {m.get('solver_U')} e {m.get('solver_e')})",
+        f"  iterations        :  {f('iterations', 'd')}",
         "-" * 60,
         f"  mass flow target  :  {f('mdot_target_kg_s', '.4f')} kg/s",
         f"  mass flow out/in  :  {f('mdot_outlet_kg_s', '.4f')} / {f('mdot_inlet_kg_s', '.4f')} kg/s"

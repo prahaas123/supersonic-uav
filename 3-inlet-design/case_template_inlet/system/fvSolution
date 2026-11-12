@@ -36,8 +36,12 @@ solvers
 SIMPLE
 {
     nNonOrthogonalCorrectors 1;
-    consistent      no;           // set by run_inlet.py (SOLVER_VARIANTS)
-    transonic       no;           // set by run_inlet.py (SOLVER_VARIANTS), yes uses div(phid,p)
+    // SIMPLEC with the compressible (transonic) p equation, as in the stock rhoSimpleFoam duct
+    // tutorials with the same mass-flow-in / fixed-p-out setup. Classic SIMPLE (transonic no,
+    // p 0.3) went unstable once the ramp reached full mass flow; the capture plane runs at
+    // M ~0.6 (1D) and higher locally, where the incompressible-style p equation struggles.
+    consistent      yes;
+    transonic       yes;
     pMinFactor      0.5;
     pMaxFactor      1.5;
 
@@ -52,15 +56,17 @@ SIMPLE
 
 relaxationFactors
 {
-    // p, rho, U and e are set by run_inlet.py (SOLVER_VARIANTS)
     fields
     {
-        p               0.3;
-        rho             0.05;
+        p               1;            // SIMPLEC needs no explicit p relaxation
     }
     equations
     {
-        U               0.5;
+        // Required with transonic yes: pEqn.relax() only enforces diagonal dominance of the
+        // p matrix when p is listed here. Without it, the first p solve from U = 0 hit NaN
+        // (inlet_T1-T3 crashed with SIGFPE on iteration 1).
+        p               1;
+        U               0.7;
         e               0.7;
         "(k|omega)"     0.7;
     }

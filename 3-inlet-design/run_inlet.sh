@@ -24,6 +24,5 @@ pip install --no-index numpy matplotlib
 
 export SQUEUE_FORMAT='%i","%j","%t","%M","%L","%D","%C","%m","%b","%R'
 
-# Optional arguments: case directory (default ./inlet_baseline) and solver variant (default baseline),
-# e.g. sbatch run_inlet.sh ./inlet_LD55_AR15 T1   (see submit_solver_study.sh for the T1-T3 study)
+# Optional argument: case directory (default ./inlet_baseline), e.g. sbatch run_inlet.sh ./inlet_LD55_AR15
 python3 run_inlet.py "$@"
