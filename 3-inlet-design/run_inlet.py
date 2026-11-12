@@ -79,16 +79,19 @@ SCALAR_BAR = {"position": [0.90, 0.05], "length": 0.90, "thickness": 48,
 # ----------------------------------------------------------------------------
 
 def main():
-    case = sys.argv[1] if len(sys.argv) > 1 else "./inlet_baseline"
+    return run_case(sys.argv[1] if len(sys.argv) > 1 else "./inlet_baseline", INLET_PARAMS)
+
+def run_case(case, params):
+    # Full run of one design, returns 0 converged, 2 not converged, 1 failed (also used by dse.py)
     name = os.path.basename(os.path.normpath(case))
-    print(f"\n{'=' * 40}\nStarting Simulation: {name}\n  {INLET_PARAMS}\n{'=' * 40}")
+    print(f"\n{'=' * 40}\nStarting Simulation: {name}\n  {params}\n{'=' * 40}")
 
     print("[1/5] Preparing case, S-duct STL and boundary conditions...")
     try:
-        refs = prepare(case, INLET_PARAMS)
+        refs = prepare(case, params)
     except Exception as e:
         print(f"  preparation failed: {e}")
-        return fail(case, "prepare_failed", {**INLET_PARAMS, "error": str(e)})
+        return fail(case, "prepare_failed", {**params, "error": str(e)})
 
     print("[2/5] Generating mesh (snappyHexMesh)...")
     t0 = time.perf_counter()
@@ -252,6 +255,14 @@ def add_extension(duct_stl, out_stl, length):
                           np.array(re.findall(r"vertex (\S+) (\S+) (\S+)", solids["wall"]), dtype=float)])
     return x_ef, float(xs[-1]), pts.min(axis=0), pts.max(axis=0)
 
+def wall_area(stl):
+    # Wetted area of the S-duct wall, capture plane to engine face (no extension)
+    import numpy as np
+    with open(stl) as fh:
+        wall = re.search(r"solid wall\n(.*?)endsolid wall\n", fh.read(), flags=re.S).group(1)
+    t = np.array(re.findall(r"vertex (\S+) (\S+) (\S+)", wall), dtype=float).reshape(-1, 3, 3)
+    return float(0.5 * np.linalg.norm(np.cross(t[:, 1] - t[:, 0], t[:, 2] - t[:, 0]), axis=1).sum())
+
 def sub(path, pattern, repl, flags=re.M):
     # Regex replace in a case file, the pattern must match
     with open(path) as fh:
@@ -278,6 +289,7 @@ def prepare(case, params):
     L = params["LD"] * bi.D_EF
     x_ef, x_out, lo, hi = add_extension(raw, path("constant", "triSurface", "duct.stl"),
                                         EXT_LENGTH_D * bi.D_EF)
+    a_wet = wall_area(raw)
     os.remove(raw)
     flow = flow_conditions(params)
 
@@ -324,7 +336,7 @@ def prepare(case, params):
           f"over {RAMP_ITERS} it (eta_duct {ETA_DUCT_EST:g}) | 1D Mach capture {flow['mach_capture_1d']:.3f}, "
           f"engine face {flow['mach_engine_face_1d']:.3f}")
 
-    return {**params, **flow, "duct_length_m": L, "x_lip_m": bi.X_LIP, "x_engine_face_m": x_ef,
+    return {**params, **flow, "duct_length_m": L, "wetted_area_m2": a_wet, "x_lip_m": bi.X_LIP, "x_engine_face_m": x_ef,
             "x_outlet_m": x_out, "first_layer_m": y1, "target_yplus": TARGET_YPLUS,
             "base_cell_m": BASE_CELL, "ramp_iters": RAMP_ITERS, "p_back_start_Pa": p_start}
 
@@ -614,6 +626,7 @@ def paraview_post(foam, images):
         ("massFlux", "rho*U_X"),
         ("p0",       f"p*(1+{0.5 * (GAMMA - 1):g}*Mach*Mach)^{GAMMA / (GAMMA - 1):g}"),
         ("p0Flux",   "p0*massFlux"),
+        ("reversed", "0.5*(1-U_X/(abs(U_X)+1e-12))"),     # 1 where the flow runs upstream, else 0
     ]:
         src = Calculator(Input=src)
         src.AttributeType = "Cell Data"
@@ -673,7 +686,8 @@ def paraview_post(foam, images):
     stats.update(duct_volume_m3=V, duct_mach_avg=I["Mach"] / V,
                  duct_mach_max=clip.CellData["Mach"].GetRange()[1],
                  duct_T_avg=I["T"] / V, duct_T_max=clip.CellData["T"].GetRange()[1],
-                 duct_p_avg=I["p"] / V, duct_p_max=clip.CellData["p"].GetRange()[1])
+                 duct_p_avg=I["p"] / V, duct_p_max=clip.CellData["p"].GetRange()[1],
+                 reversed_flow_frac=I["reversed"] / V)       # separation indicator, volume fraction
     Delete(clip)
 
     stats["pt_recovery_duct"] = stats["ef_p0_avg"] / stats["cap_p0_avg"]

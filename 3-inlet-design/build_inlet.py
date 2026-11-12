@@ -4,7 +4,7 @@ import numpy as np
 
 BOUNDS = {
     "LD": (4.0, 7.0),
-    "AR": (1.3, 2.0),
+    "AR": (1.3, 1.75),   # above ~1.8 the capture area chokes at the target mass flow
     "WH": (1.5, 4.0),
     "c_cl": (0.35, 0.65),
     "c_area": (0.30, 0.70),
