@@ -1,50 +1,35 @@
-import os
-import re
-import sys
+"""One S-duct inlet CFD run: geometry, mesh, rhoSimpleFoam, metrics and images.
+
+    python3 run_inlet.py [case_dir]                        full run (see run_inlet.sh)
+    pvbatch run_inlet.py post <case.foam> <images_dir>     ParaView part, called by the full run
+
+Boundary conditions (case_template_inlet): total pressure / temperature at the capture plane and a
+fixed static back pressure at the outlet, so the mass flow is a result. It matches MDOT_TARGET when
+ETA_DUCT_EST equals the duct recovery of the run; the summary suggests the value to use next.
+"""
 import json
 import math
-import time
+import os
+import re
 import shutil
 import subprocess
+import sys
+import time
 
 SCRIPT_DIR    = os.path.dirname(os.path.abspath(__file__))
 TOOLS_DIR     = os.path.join(SCRIPT_DIR, "..", "0-tools")
 CASE_TEMPLATE = os.path.join(SCRIPT_DIR, "case_template_inlet")
+# build_inlet and metrics need numpy, so they are imported inside the functions that use them:
+# pvbatch loads this file too and its Python is not guaranteed to have numpy.
+sys.path[:0] = [SCRIPT_DIR, TOOLS_DIR]
 
 # Flight condition
 ALTITUDE_M     = 15000.0     # [m]
 MACH           = 1.5
 PT_RECOVERY_2D = 0.94        # total pressure recovery of the 2D external compression (2d-inlet-designs.csv)
 MDOT_TARGET    = 0.2635      # RDE air mass flow [kg/s] (README, section 1)
-ETA_DUCT_EST   = 0.92        # assumed S-duct p0 recovery, sets the outlet p and so the mass flow
-                             # (0.92 from inlet_baseline, mass-flow BC run, not converged).
-                             # If the run misses MDOT_TARGET, set this to the reported duct recovery and rerun.
-
-# Run settings
-NP             = 50          # MPI processes
-N_ITER         = 8000        # rhoSimpleFoam iterations (residualControl may stop earlier)
-WRITE_INTERVAL = 500         # [iterations] periodic writes
-BASE_CELL      = 0.006       # background cell [m], refined to level 2 (1.5 mm) inside the duct
-TARGET_YPLUS   = 40.0        # cell-centre y+ from the 1D estimate; the baseline run puts the wall at ~30-100
-YPLUS_RANGE    = (30.0, 100.0)  # wall-function range, average y+ outside it is flagged
-EXT_LENGTH_D   = 1.5         # straight extension after the engine face [engine-face diameters]
-N_EXT          = 13          # axial stations on the extension
-TURB_INTENSITY = 0.05        # at the capture plane, behind the shock system
-RAMP_ITERS     = 1500        # outlet p ramps from P_START_FRAC of the way down to p_back over these iterations
-P_START_FRAC   = 0.2         # start the back pressure at p0_capture - 0.2 * (p0_capture - p_back)
-
-# Convergence (iterative) checks, evaluated over the averaging window
-MASS_IMBALANCE_TOL_PCT = 0.5 # |inlet - outlet| mass flow
-MDOT_OSC_TOL_PCT       = 0.2 # outlet mass flow half peak-to-peak / mean
-P_CAP_OSC_TOL_PCT      = 0.2 # capture-plane static pressure half peak-to-peak / mean
-MDOT_TARGET_TOL_PCT    = 0.5 # |mean outlet mass flow / MDOT_TARGET - 1|, reported, not a convergence check
-CONT_ERR_TOL           = 1e-3  # mean "sum local" continuity error over the window
-# Physical checks, evaluated on the averaged fields
-T0_MARGIN_K            = 1.0 # duct T max may not exceed T0 by more than this (adiabatic duct)
-P0_CAP_DEV_WARN_PCT    = 5.0 # warn when the capture p0 is this far from p0_capture (assumed ETA_DUCT_EST)
-
-GAMMA = 1.4
-R_GAS = 287.058
+ETA_DUCT_EST   = 0.9664      # assumed S-duct p0 recovery, sets the back pressure and so the mass flow
+                             # (0.9664: converged run at ETA_DUCT_EST 0.92, mass flow +17.5 %)
 
 # S-duct design
 INLET_PARAMS = dict(
@@ -55,104 +40,103 @@ INLET_PARAMS = dict(
     c_area=0.5,   # area-distribution inflection
 )
 
+# Run settings
+NP             = 50          # MPI processes
+N_ITER         = 8000        # rhoSimpleFoam iterations (residualControl usually stops it earlier)
+WRITE_INTERVAL = 500         # [iterations]
+BASE_CELL      = 0.006       # background cell [m], refined to level 2 (1.5 mm) inside the duct
+TARGET_YPLUS   = 40.0        # cell-centre y+ used to size the first layer
+YPLUS_RANGE    = (30.0, 100.0)  # wall-function range for the average y+
+EXT_LENGTH_D   = 1.5         # straight extension after the engine face [engine-face diameters]
+N_EXT          = 13          # axial stations on the extension
+TURB_INTENSITY = 0.05        # at the capture plane, behind the shock system
+RAMP_ITERS     = 1500        # back pressure ramps down to p_back over these iterations ...
+P_START_FRAC   = 0.2         # ... starting at p0_capture - P_START_FRAC * (p0_capture - p_back)
+
+# Convergence checks over the last metrics.TAIL_FRACTION of the run
+MASS_IMBALANCE_TOL_PCT = 0.5   # |inlet - outlet| mass flow
+OSC_TOL_PCT            = 0.2   # half peak-to-peak / mean, outlet mass flow and capture static p
+CONT_ERR_TOL           = 1e-3  # mean "sum local" continuity error
+MDOT_TARGET_TOL_PCT    = 0.5   # mass flow vs MDOT_TARGET, reported only (it is a result of ETA_DUCT_EST)
+T0_MARGIN_K            = 1.0   # adiabatic duct: T may not exceed T0 by more than this
+
+GAMMA = 1.4
+R_GAS = 287.058
+
 # Post processing
-VIEW_SIZE  = [3840, 1440]
+SLICE_STATIONS = (0.0, 0.25, 0.5, 0.75, 1.0)   # x/L of the front-view slices, capture plane -> engine face
+X_OFFSET   = 1e-4            # planes kept just inside the capture plane / downstream of the engine face
 Y_SLICE    = 1e-4            # side slice just off the y = 0 symmetry plane (avoids cell faces)
-X_OFFSET   = 1e-4            # measurement planes just downstream of the capture plane / engine face
+VIEW_SIZE  = [3840, 1440]
 SCALAR_BAR = {"position": [0.90, 0.05], "length": 0.90, "thickness": 48,
               "title_size": 48, "label_size": 40, "n_labels": 6}
 
+# ----------------------------------------------------------------------------
+# Driver
+# ----------------------------------------------------------------------------
+
 def main():
-    # usage: python3 run_inlet.py [case_dir]
-    job_directory = sys.argv[1] if len(sys.argv) > 1 else "./inlet_baseline"
-    results = design_point(INLET_PARAMS, job_directory)
-    if results is None:
-        print("Run did not produce metrics.")
-        return 1
-    return 0 if results.get("converged") else 2
+    case = sys.argv[1] if len(sys.argv) > 1 else "./inlet_baseline"
+    name = os.path.basename(os.path.normpath(case))
+    print(f"\n{'=' * 40}\nStarting Simulation: {name}\n  {INLET_PARAMS}\n{'=' * 40}")
 
-def design_point(params, job_directory):
-    job_id = os.path.basename(os.path.normpath(job_directory))
-    print(f"\n{'='*40}")
-    print(f"Starting Simulation: {job_id}")
-    print(f"  {params}")
-    print(f"{'='*40}")
+    print("[1/5] Preparing case, S-duct STL and boundary conditions...")
+    try:
+        refs = prepare(case, INLET_PARAMS)
+    except Exception as e:
+        print(f"  preparation failed: {e}")
+        return fail(case, "prepare_failed", {**INLET_PARAMS, "error": str(e)})
 
-    # 1. Prepare
-    print("[1/6] Preparing case, S-duct STL and boundary conditions...")
-    refs = prepare(job_directory, params)
-    if refs is None or "status" in refs:
-        status = refs["status"] if refs else "prepare_failed"
-        print(f"Error: {status} for {job_id}.")
-        return write_failure(job_directory, status, refs)
+    print("[2/5] Generating mesh (snappyHexMesh)...")
+    t0 = time.perf_counter()
+    if not mesh(case):
+        return fail(case, "mesh_failed", refs)
+    t1 = time.perf_counter()
 
-    # 2. Mesh
-    print("[2/6] Generating mesh (snappyHexMesh)...")
-    t_start = time.perf_counter()
-    if not mesh(job_directory):
-        return write_failure(job_directory, "mesh_failed", refs)
-    t_meshed = time.perf_counter()
+    print("[3/5] Solving (rhoSimpleFoam)...")
+    if not solve(case):
+        return fail(case, "solve_failed", refs)
+    t2 = time.perf_counter()
+    refs.update(mesh_time_s=round(t1 - t0, 1), solve_time_s=round(t2 - t1, 1))
 
-    # 3. Solve
-    print("[3/6] Solving (rhoSimpleFoam)...")
-    if not solve(job_directory):
-        return write_failure(job_directory, "solve_failed", refs)
-    t_solved = time.perf_counter()
+    print("[4/5] Convergence and ParaView post processing...")
+    write_json(case, convergence_metrics(case, refs))
+    post_process(case)                      # adds the flow metrics to metrics.json
+    plot_convergence(case)
+    m = read_json(case)
+    m["failed_checks"] += physical_checks(m)
+    m["converged"] = not m["failed_checks"]
+    m["status"] = "ok" if m["converged"] else "not_converged"
+    write_json(case, m)
+    print(format_summary(m))
+    print_warnings(m)
 
-    timings = {
-        "mesh_time_s":  round(t_meshed - t_start, 1),
-        "solve_time_s": round(t_solved - t_meshed, 1),
-        "total_time_s": round(t_solved - t_start, 1),
-    }
+    print("[5/5] Cleaning up processor files...")
+    sh(f"rm -rf {case}/processor*")
+    print(f"Finished {name}")
+    return 0 if m["converged"] else 2
 
-    # 4. Mass flow and convergence
-    print("[4/6] Extracting mass flow and convergence...")
-    results = convergence_metrics(job_directory, {**refs, **timings})
-
-    # 5. ParaView: flow metrics merged into metrics.json, side slices
-    print("[5/6] Post processing in ParaView...")
-    post_process(job_directory)
-    plot_convergence(job_directory)
-    results = physical_checks(job_directory, read_json(job_directory) or results)
-    print(format_summary(results))
-
-    if not results.get("converged"):
-        print(f"WARNING: {job_id} failed {results.get('failed_checks')}. "
-              f"Treat this result as unusable.")
-
-    # 6. Clean up
-    print("[6/6] Cleaning up processor files...")
-    cleanup(job_directory)
-    print(f"Successfully completed {job_id}!")
-    return results
+def fail(case, status, refs):
+    print(f"Error: {status}")
+    write_json(case, {"case": os.path.abspath(case), "status": status, "converged": False, **refs})
+    sh(f"rm -rf {case}/processor*")
+    return 1
 
 # ----------------------------------------------------------------------------
 # Flow conditions
 # ----------------------------------------------------------------------------
 
-def isa_atmosphere(altitude_m):
-    g0 = 9.80665;  R = R_GAS
-    T0 = 288.15;   p0 = 101325.0
-    L  = -0.0065;  h_tp = 11000.0
-
-    if altitude_m <= h_tp:
-        T = T0 + L * altitude_m
-        p = p0 * (T / T0) ** (-g0 / (L * R))
-    else:
-        T_tp = T0 + L * h_tp
-        p_tp = p0 * (T_tp / T0) ** (-g0 / (L * R))
-        T    = T_tp
-        p    = p_tp * math.exp(-g0 * (altitude_m - h_tp) / (R * T_tp))
-
-    rho = p / (R * T)
-    a   = math.sqrt(GAMMA * R * T)
-    return dict(T=round(T, 4), p=round(p, 2), rho=round(rho, 6), a=round(a, 4))
-
-def sutherland(T):
-    return 1.458e-6 * T**1.5 / (T + 110.4)
+def isa_atmosphere(h):
+    # Troposphere + lower stratosphere, returns (T, p)
+    g0, T_sl, p_sl, lapse, h_tp = 9.80665, 288.15, 101325.0, -0.0065, 11000.0
+    T = T_sl + lapse * min(h, h_tp)
+    p = p_sl * (T / T_sl) ** (-g0 / (lapse * R_GAS))
+    if h > h_tp:
+        p *= math.exp(-g0 * (h - h_tp) / (R_GAS * T))
+    return T, p
 
 def isentropic_ratio(M):
-    # T0/T, p0/p = ratio**(gamma/(gamma-1))
+    # T0/T; p0/p = ratio ** (gamma / (gamma - 1))
     return 1.0 + 0.5 * (GAMMA - 1.0) * M * M
 
 def mass_flow(M, area, p0, T0):
@@ -172,66 +156,57 @@ def subsonic_mach(mdot, area, p0, T0):
 def flow_conditions(params):
     import build_inlet as bi
 
-    atm   = isa_atmosphere(ALTITUDE_M)
+    T_inf, p_inf = isa_atmosphere(ALTITUDE_M)
     pexp  = GAMMA / (GAMMA - 1.0)
-    p0inf = atm["p"] * isentropic_ratio(MACH) ** pexp
-    T0    = atm["T"] * isentropic_ratio(MACH)
+    T0    = T_inf * isentropic_ratio(MACH)
+    p0inf = p_inf * isentropic_ratio(MACH) ** pexp
     p0c   = PT_RECOVERY_2D * p0inf
-
     a_ef  = math.pi / 4.0 * bi.D_EF ** 2
-    a_cap = a_ef / params["AR"]          # ellipse, W0 * H0 = D_EF^2 / AR
+    a_cap = a_ef / params["AR"]
 
-    # Engine face: target mass flow at the capture p0 less an assumed duct loss. The outlet p is
-    # fixed to this static pressure and the capture p0 is imposed, so the mass flow comes out of
-    # the solution; it matches MDOT_TARGET when ETA_DUCT_EST equals the actual duct recovery.
-    p0ef = ETA_DUCT_EST * p0c
-    m_ef = subsonic_mach(MDOT_TARGET, a_ef, p0ef, T0)
+    # 1D engine face at the target mass flow with the assumed duct recovery -> back pressure
+    m_ef = subsonic_mach(MDOT_TARGET, a_ef, ETA_DUCT_EST * p0c, T0)
     if m_ef is None:
         raise ValueError("MDOT_TARGET is above the choked mass flow of the engine face")
     m_cap = subsonic_mach(MDOT_TARGET, a_cap, p0c, T0)
+    if m_cap is None:
+        raise ValueError("MDOT_TARGET is above the choked mass flow of the capture area")
 
-    p_back = p0ef / isentropic_ratio(m_ef) ** pexp
+    p_back = ETA_DUCT_EST * p0c / isentropic_ratio(m_ef) ** pexp
     T_ef   = T0 / isentropic_ratio(m_ef)
     U_ef   = m_ef * math.sqrt(GAMMA * R_GAS * T_ef)
-    rho_ef = p_back / (R_GAS * T_ef)
 
-    # Inlet turbulence: intensity and mixing length from the capture equivalent diameter
-    U_cap = U_ef if m_cap is None else \
-        m_cap * math.sqrt(GAMMA * R_GAS * T0 / isentropic_ratio(m_cap))
+    # Capture-plane turbulence: intensity, mixing length from the capture equivalent diameter
+    U_cap = m_cap * math.sqrt(GAMMA * R_GAS * T0 / isentropic_ratio(m_cap))
     l_mix = 0.07 * bi.D_EF / math.sqrt(params["AR"])
     k     = 1.5 * (TURB_INTENSITY * U_cap) ** 2
     omega = k ** 0.5 / (0.09 ** 0.25 * l_mix)
 
     return dict(
-        p_inf_Pa=atm["p"], T_inf_K=atm["T"],
-        p0_inf_Pa=p0inf, T0_K=T0, p0_capture_Pa=p0c, p_back_Pa=p_back,
-        mdot_target_kg_s=MDOT_TARGET, pt_recovery_2d=PT_RECOVERY_2D, eta_duct_est=ETA_DUCT_EST,
+        p_inf_Pa=p_inf, T_inf_K=T_inf, p0_inf_Pa=p0inf, T0_K=T0,
+        p0_capture_Pa=p0c, p_back_Pa=p_back, mdot_target_kg_s=MDOT_TARGET,
+        pt_recovery_2d=PT_RECOVERY_2D, eta_duct_est=ETA_DUCT_EST,
         capture_area_m2=a_cap, engine_face_area_m2=a_ef,
-        # isentropic 1D estimates at the target mass flow (capture None = choked)
         mach_capture_1d=m_cap, mach_engine_face_1d=m_ef,
-        T_ef_1d_K=T_ef, U_ef_1d=U_ef, rho_ef_1d=rho_ef,
+        T_ef_1d_K=T_ef, U_ef_1d=U_ef, rho_ef_1d=p_back / (R_GAS * T_ef),
         k_init=k, omega_init=omega, mixing_length_m=l_mix,
     )
 
 def first_layer_thickness(rho, U, T, length, y_plus):
-    nu    = sutherland(T) / rho
-    re_l  = U * length / nu
-    cf    = 0.026 / re_l ** (1.0 / 7.0)      # turbulent flat plate skin friction
+    nu    = 1.458e-6 * T ** 1.5 / (T + 110.4) / rho      # Sutherland
+    cf    = 0.026 / (U * length / nu) ** (1.0 / 7.0)     # turbulent flat plate
     u_tau = U * math.sqrt(0.5 * cf)
-    # OpenFOAM evaluates y+ at the cell centre, half the first-layer height
-    return 2.0 * y_plus * nu / u_tau
+    return 2.0 * y_plus * nu / u_tau                     # y+ is evaluated at the cell centre
 
 # ----------------------------------------------------------------------------
-# Geometry
+# Geometry and case setup
 # ----------------------------------------------------------------------------
 
-def _write_solid(fh, name, tris):
-    import numpy as np
-    n = np.cross(tris[:, 1] - tris[:, 0], tris[:, 2] - tris[:, 0])
-    n /= np.linalg.norm(n, axis=1, keepdims=True)
+def write_solid(fh, name, tris):
+    import build_inlet as bi
     fh.write(f"solid {name}\n")
-    for nrm, tri in zip(n, tris):
-        fh.write(f" facet normal {nrm[0]:.6e} {nrm[1]:.6e} {nrm[2]:.6e}\n  outer loop\n")
+    for n, tri in zip(bi._normals(tris), tris):
+        fh.write(f" facet normal {n[0]:.6e} {n[1]:.6e} {n[2]:.6e}\n  outer loop\n")
         for v in tri:
             fh.write(f"   vertex {v[0]:.9e} {v[1]:.9e} {v[2]:.9e}\n")
         fh.write("  endloop\n endfacet\n")
@@ -242,30 +217,24 @@ def add_extension(duct_stl, out_stl, length):
     import numpy as np
 
     with open(duct_stl) as fh:
-        text = fh.read()
-    solids = dict(re.findall(r"solid (\w+)\n(.*?)endsolid \1\n", text, flags=re.S))
+        solids = dict(re.findall(r"solid (\w+)\n(.*?)endsolid \1\n", fh.read(), flags=re.S))
 
-    v = np.array(re.findall(r"vertex (\S+) (\S+) (\S+)", solids["outlet"]), dtype=float)
-    v = np.unique(v, axis=0)
+    v = np.unique(np.array(re.findall(r"vertex (\S+) (\S+) (\S+)", solids["outlet"]), dtype=float), axis=0)
     x_ef = float(v[0, 0])
-    i_c = np.argmin([np.sum((p - v.mean(axis=0)) ** 2) for p in v])
+    i_c = np.argmin(np.sum((v - v.mean(axis=0)) ** 2, axis=1))
     centre, ring = v[i_c], np.delete(v, i_c, axis=0)
-    # Counter-clockwise about +x, same order as build_inlet
     ang = np.mod(np.arctan2(ring[:, 2] - centre[2], ring[:, 1] - centre[1]), 2 * np.pi)
-    ring = ring[np.argsort(ang)]
+    ring = ring[np.argsort(ang)]            # counter-clockwise about +x, same order as build_inlet
 
     xs = x_ef + length * np.linspace(0.0, 1.0, N_EXT)
     P = np.repeat(ring[None, :, :], N_EXT, axis=0)
     P[..., 0] = xs[:, None]
-
-    nc = len(ring)
     i = np.arange(N_EXT - 1)[:, None]
-    j = np.arange(nc)[None, :]
-    jn = (j + 1) % nc
+    j = np.arange(len(ring))[None, :]
+    jn = (j + 1) % len(ring)
     a, b, c, d = P[i, j], P[i + 1, j], P[i + 1, jn], P[i, jn]
     wall = np.concatenate([np.stack([a, d, c], -2).reshape(-1, 3, 3),
                            np.stack([a, c, b], -2).reshape(-1, 3, 3)])
-
     end = P[-1]
     C = np.broadcast_to(np.array([xs[-1], centre[1], centre[2]]), end.shape)
     cap = np.stack([C, end, np.roll(end, -1, axis=0)], 1)      # normal +x, outward
@@ -273,149 +242,108 @@ def add_extension(duct_stl, out_stl, length):
     with open(out_stl, "w") as fh:
         for name in ("inlet", "wall"):
             fh.write(f"solid {name}\n{solids[name]}endsolid {name}\n")
-        _write_solid(fh, "extension", wall)
-        _write_solid(fh, "outlet", cap)
+        write_solid(fh, "extension", wall)
+        write_solid(fh, "outlet", cap)
 
-    pts = np.array(re.findall(r"vertex (\S+) (\S+) (\S+)", open(out_stl).read()), dtype=float)
+    pts = np.concatenate([P.reshape(-1, 3),
+                          np.array(re.findall(r"vertex (\S+) (\S+) (\S+)", solids["wall"]), dtype=float)])
     return x_ef, float(xs[-1]), pts.min(axis=0), pts.max(axis=0)
 
-# ----------------------------------------------------------------------------
-# Case setup
-# ----------------------------------------------------------------------------
-
-def _sub(path, pattern, repl, flags=re.M):
+def sub(path, pattern, repl, flags=re.M):
+    # Regex replace in a case file, the pattern must match
     with open(path) as fh:
-        text = fh.read()
-    text, n = re.subn(pattern, repl, text, flags=flags)
+        text, n = re.subn(pattern, repl, fh.read(), flags=flags)
     if n == 0:
         raise ValueError(f"pattern {pattern!r} not found in {path}")
     with open(path, "w") as fh:
         fh.write(text)
 
-def prepare(job_directory, params):
-    sys.path.insert(0, SCRIPT_DIR)
+def prepare(case, params):
     import numpy as np
     import build_inlet as bi
 
-    try:
-        if os.path.exists(job_directory):
-            shutil.rmtree(job_directory)
-        shutil.copytree(CASE_TEMPLATE, job_directory, ignore=shutil.ignore_patterns("*.foam"))
-        job_id = os.path.basename(os.path.normpath(job_directory))
-        open(os.path.join(job_directory, f"{job_id}.foam"), "w").close()
+    if os.path.exists(case):
+        shutil.rmtree(case)
+    shutil.copytree(CASE_TEMPLATE, case, ignore=shutil.ignore_patterns("*.foam"))
+    open(os.path.join(case, os.path.basename(os.path.normpath(case)) + ".foam"), "w").close()
+    path = lambda *p: os.path.join(case, *p)
 
-        # Geometry: S-duct from build_inlet, then the straight extension
-        tri_dir = os.path.join(job_directory, "constant", "triSurface")
-        os.makedirs(tri_dir, exist_ok=True)
-        raw = os.path.join(tri_dir, "sduct_raw.stl")
-        try:
-            bi.build_inlet(out_path=raw, **params)
-        except (bi.GeometryError, ValueError) as e:
-            print(f"  geometry rejected: {e}")
-            return {"status": "geometry_failed", **params}
-        L = params["LD"] * bi.D_EF
-        x_ef, x_out, lo, hi = add_extension(raw, os.path.join(tri_dir, "duct.stl"),
-                                            EXT_LENGTH_D * bi.D_EF)
-        os.remove(raw)
+    # Geometry: S-duct from build_inlet plus the straight extension
+    raw = path("constant", "triSurface", "sduct_raw.stl")
+    os.makedirs(os.path.dirname(raw), exist_ok=True)
+    bi.build_inlet(out_path=raw, **params)
+    L = params["LD"] * bi.D_EF
+    x_ef, x_out, lo, hi = add_extension(raw, path("constant", "triSurface", "duct.stl"),
+                                        EXT_LENGTH_D * bi.D_EF)
+    os.remove(raw)
+    flow = flow_conditions(params)
 
-        flow = flow_conditions(params)
-        if flow["mach_capture_1d"] is None:
-            print("  WARNING: target mass flow is above the choked flow of the capture area "
-                  "(isentropic), the duct cannot pass MDOT_TARGET at this recovery.")
+    # Background block: duct bounding box padded by 1.5 cells
+    lo, hi = lo - 1.5 * BASE_CELL, hi + 1.5 * BASE_CELL
+    n = np.maximum(np.ceil((hi - lo) / BASE_CELL).astype(int), 1)
+    hi = lo + n * BASE_CELL
+    corners = [(lo[0], lo[1]), (hi[0], lo[1]), (hi[0], hi[1]), (lo[0], hi[1])]
+    verts = [(x, y, z) for z in (lo[2], hi[2]) for x, y in corners]
+    vtext = "vertices\n(\n" + "".join(f"    ({x:.6f} {y:.6f} {z:.6f})   // {k}\n"
+                                      for k, (x, y, z) in enumerate(verts)) + ");"
+    sub(path("system", "blockMeshDict"), r"^vertices\s*\(.*?^\);", vtext, flags=re.M | re.S)
+    sub(path("system", "blockMeshDict"), r"hex \(0 1 2 3 4 5 6 7\) \(\d+ \d+ \d+\)",
+        f"hex (0 1 2 3 4 5 6 7) ({n[0]} {n[1]} {n[2]})")
 
-        # Background block: duct bounding box padded by 1.5 cells
-        pad = 1.5 * BASE_CELL
-        lo, hi = lo - pad, hi + pad
-        n = np.maximum(np.ceil((hi - lo) / BASE_CELL).astype(int), 1)
-        hi = lo + n * BASE_CELL
-        verts = [(lo[0], lo[1], lo[2]), (hi[0], lo[1], lo[2]), (hi[0], hi[1], lo[2]), (lo[0], hi[1], lo[2]),
-                 (lo[0], lo[1], hi[2]), (hi[0], lo[1], hi[2]), (hi[0], hi[1], hi[2]), (lo[0], hi[1], hi[2])]
-        vtext = "vertices\n(\n" + "".join(
-            f"    ({x:.6f} {y:.6f} {z:.6f})   // {k}\n" for k, (x, y, z) in enumerate(verts)) + ");"
-        bmd = os.path.join(job_directory, "system", "blockMeshDict")
-        _sub(bmd, r"^vertices\s*\(.*?^\);", vtext.replace("\\", "\\\\"), flags=re.M | re.S)
-        _sub(bmd, r"hex \(0 1 2 3 4 5 6 7\) \(\d+ \d+ \d+\)",
-             f"hex (0 1 2 3 4 5 6 7) ({n[0]} {n[1]} {n[2]})")
+    # snappyHexMesh: a point inside the duct (mid-length on the centreline) and the first layer
+    zc = float(bi._section(bi.X_LIP + 0.5 * L, L, 0, 0, params["c_cl"], params["c_area"])[0])
+    loc = (bi.X_LIP + 0.5 * L + 1.234e-4, 1.234e-4, zc + 1.234e-4)
+    y1 = first_layer_thickness(flow["rho_ef_1d"], flow["U_ef_1d"], flow["T_ef_1d_K"], L, TARGET_YPLUS)
+    shm = path("system", "snappyHexMeshDict")
+    sub(shm, r"^(\s*)locationInMesh\s+[^;\n]+;", rf"\g<1>locationInMesh ({loc[0]:.6f} {loc[1]:.6f} {loc[2]:.6f});")
+    sub(shm, r"^(\s*)firstLayerThickness\s+[^;\n]+;", rf"\g<1>firstLayerThickness {y1:.4g};")
+    sub(shm, r"^(\s*)minThickness\s+[^;\n]+;", rf"\g<1>minThickness {0.5 * y1:.4g};")
 
-        # snappyHexMesh: point inside the duct (mid-length on the centreline), first layer
-        zc, _, _ = bi._section(bi.X_LIP + 0.5 * L, L, 0, 0, params["c_cl"], params["c_area"])
-        loc = (bi.X_LIP + 0.5 * L + 1.234e-4, 1.234e-4, float(zc) + 1.234e-4)
-        y1 = first_layer_thickness(flow["rho_ef_1d"], flow["U_ef_1d"], flow["T_ef_1d_K"], L, TARGET_YPLUS)
-        shm = os.path.join(job_directory, "system", "snappyHexMeshDict")
-        _sub(shm, r"^(\s*)locationInMesh\s+[^;\n]+;",
-             rf"\g<1>locationInMesh ({loc[0]:.6f} {loc[1]:.6f} {loc[2]:.6f});")
-        _sub(shm, r"^(\s*)firstLayerThickness\s+[^;\n]+;", rf"\g<1>firstLayerThickness {y1:.4g};")
-        _sub(shm, r"^(\s*)minThickness\s+[^;\n]+;", rf"\g<1>minThickness {0.5 * y1:.4g};")
-        print(f"  {n[0]}x{n[1]}x{n[2]} background cells, first layer {y1*1e6:.1f} um "
-              f"for y+ = {TARGET_YPLUS:g}")
+    # Run control
+    sub(path("system", "decomposeParDict"), r"^numberOfSubdomains\s+\d+;", f"numberOfSubdomains  {NP};")
+    sub(path("system", "controlDict"), r"^endTime\s+[^;\n]+;", f"endTime         {N_ITER};")
+    sub(path("system", "controlDict"), r"^writeInterval\s+[^;\n]+;", f"writeInterval   {WRITE_INTERVAL};")
 
-        # decomposeParDict, controlDict
-        _sub(os.path.join(job_directory, "system", "decomposeParDict"),
-             r"^numberOfSubdomains\s+\d+;", f"numberOfSubdomains  {NP};")
-        cd = os.path.join(job_directory, "system", "controlDict")
-        _sub(cd, r"^endTime\s+[^;\n]+;", f"endTime         {N_ITER};")
-        _sub(cd, r"^writeInterval\s+[^;\n]+;", f"writeInterval   {WRITE_INTERVAL};")
+    # Back pressure ramp, then boundary / initial values
+    p0c, p_back = flow["p0_capture_Pa"], flow["p_back_Pa"]
+    p_start = p0c - P_START_FRAC * (p0c - p_back)
+    sub(path("0", "p"), r"^(\s*)uniformValue\s+[^;\n]+;",
+        rf"\g<1>uniformValue    table ((0 {p_start:.6g}) ({RAMP_ITERS} {p_back:.6g}));")
+    values = {"p0In": p0c, "T0In": flow["T0_K"], "pOut": p_back, "pInit": p_start,
+              "TInit": flow["T_ef_1d_K"], "UInit": f"({flow['U_ef_1d']:.6g} 0 0)",
+              "kInit": flow["k_init"], "omegaInit": flow["omega_init"],
+              "turbIntensity": TURB_INTENSITY, "mixingLength": flow["mixing_length_m"]}
+    with open(path("0", "include", "initialConditions"), "w") as fh:
+        fh.writelines(f"{k:<13} {v if isinstance(v, str) else format(v, '.6g')};\n" for k, v in values.items())
 
-        # fieldAverage over the same window the convergence check uses
-        sys.path.insert(0, TOOLS_DIR)
-        import metrics
-        avg_start = int(round(1 + (1.0 - metrics.TAIL_FRACTION) * (N_ITER - 1)))
-        if RAMP_ITERS >= avg_start:
-            raise ValueError("RAMP_ITERS must end before the averaging window")
-        _sub(cd, r"^(\s*)timeStart\s+[^;\n]+;", rf"\g<1>timeStart       {avg_start};")
+    print(f"  {n[0]}x{n[1]}x{n[2]} background cells, first layer {y1 * 1e6:.1f} um for y+ = {TARGET_YPLUS:g}")
+    print(f"  p0 capture {p0c:.0f} Pa, T0 {flow['T0_K']:.2f} K | back pressure {p_start:.0f} -> {p_back:.0f} Pa "
+          f"over {RAMP_ITERS} it (eta_duct {ETA_DUCT_EST:g}) | 1D Mach capture {flow['mach_capture_1d']:.3f}, "
+          f"engine face {flow['mach_engine_face_1d']:.3f}")
 
-        # Outlet back pressure: fixed schedule, from just below the capture p0 down to p_back, then held
-        p_start = flow["p0_capture_Pa"] - P_START_FRAC * (flow["p0_capture_Pa"] - flow["p_back_Pa"])
-        _sub(os.path.join(job_directory, "0", "p"), r"^(\s*)uniformValue\s+[^;\n]+;",
-             rf"\g<1>uniformValue    table ((0 {p_start:.6g}) ({RAMP_ITERS} {flow['p_back_Pa']:.6g}));")
-
-        # Boundary / initial values
-        with open(os.path.join(job_directory, "0", "include", "initialConditions"), "w") as f:
-            f.write(f"p0In        {flow['p0_capture_Pa']:.6g};\n")
-            f.write(f"T0In        {flow['T0_K']:.6g};\n")
-            f.write(f"pOut        {flow['p_back_Pa']:.6g};\n")
-            f.write(f"pInit       {p_start:.6g};\n")
-            f.write(f"TInit       {flow['T_ef_1d_K']:.6g};\n")
-            f.write(f"UInit       ({flow['U_ef_1d']:.6g} 0 0);\n")
-            f.write(f"kInit       {flow['k_init']:.6g};\n")
-            f.write(f"omegaInit   {flow['omega_init']:.6g};\n")
-            f.write(f"turbIntensity {TURB_INTENSITY:.6g};\n")
-            f.write(f"mixingLength  {flow['mixing_length_m']:.6g};\n")
-
-        print(f"  back pressure {p_start:.0f} -> {flow['p_back_Pa']:.0f} Pa (ramped over {RAMP_ITERS} it) | "
-              f"fields averaged from iteration {avg_start}")
-        print(f"  p0 capture (imposed) {flow['p0_capture_Pa']:.0f} Pa | T0 {flow['T0_K']:.2f} K | "
-              f"p back (eta_duct {ETA_DUCT_EST:g}) {flow['p_back_Pa']:.0f} Pa | target {MDOT_TARGET:g} kg/s | "
-              f"1D Mach capture "
-              f"{flow['mach_capture_1d'] if flow['mach_capture_1d'] is None else round(flow['mach_capture_1d'], 3)}"
-              f" / engine face {flow['mach_engine_face_1d']:.3f}")
-
-        return {**params, **flow,
-                "duct_length_m": L, "x_lip_m": bi.X_LIP, "x_engine_face_m": x_ef,
-                "x_outlet_m": x_out, "extension_length_m": x_out - x_ef,
-                "first_layer_m": y1, "target_yplus": TARGET_YPLUS, "base_cell_m": BASE_CELL,
-                "ramp_iters": RAMP_ITERS, "p_back_start_Pa": p_start, "avg_start_iter": avg_start}
-    except Exception as e:
-        print(f"Exception during preparation: {e}")
-        return None
+    return {**params, **flow, "duct_length_m": L, "x_lip_m": bi.X_LIP, "x_engine_face_m": x_ef,
+            "x_outlet_m": x_out, "first_layer_m": y1, "target_yplus": TARGET_YPLUS,
+            "base_cell_m": BASE_CELL, "ramp_iters": RAMP_ITERS, "p_back_start_Pa": p_start}
 
 # ----------------------------------------------------------------------------
 # OpenFOAM
 # ----------------------------------------------------------------------------
 
-def run_steps(job_directory, steps):
+def sh(cmd):
+    return subprocess.run(cmd, shell=True, executable="/bin/bash").returncode
+
+def run_steps(case, steps):
     for app, cmd in steps:
-        log = os.path.join(job_directory, f"log.{app}")
+        log = os.path.join(case, f"log.{app}")
         print(f"  -> {cmd}   (log.{app})")
-        rc = subprocess.run(f"{cmd} > {log} 2>&1", shell=True, executable="/bin/bash").returncode
+        rc = sh(f"{cmd} > {log} 2>&1")
         if rc != 0:
             print(f"  {app} failed (exit {rc}), last lines of log.{app}:")
-            subprocess.run(f"tail -n 30 {log}", shell=True, executable="/bin/bash")
+            sh(f"tail -n 30 {log}")
             return False
     return True
 
-def mesh(job_directory):
-    c = job_directory
+def mesh(c):
     ok = run_steps(c, [
         ("surfaceFeatureExtract", f"surfaceFeatureExtract -case {c}"),
         ("blockMesh",             f"blockMesh -case {c}"),
@@ -423,266 +351,198 @@ def mesh(job_directory):
         ("snappyHexMesh",         f"mpirun -np {NP} snappyHexMesh -parallel -overwrite -case {c}"),
         ("reconstructParMesh",    f"reconstructParMesh -constant -case {c}"),
     ])
-    subprocess.run(f"rm -rf {c}/processor*", shell=True, executable="/bin/bash")
+    sh(f"rm -rf {c}/processor*")
     if ok:
-        # Mesh quality and layer report, kept for reference only
-        subprocess.run(f"checkMesh -constant -case {c} > {c}/log.checkMesh 2>&1",
-                       shell=True, executable="/bin/bash")
-    return ok and os.path.isdir(f"{c}/constant/polyMesh")
+        sh(f"checkMesh -constant -case {c} > {c}/log.checkMesh 2>&1")     # quality report, reference only
+    return ok and os.path.isdir(os.path.join(c, "constant", "polyMesh"))
 
-def solve(job_directory):
-    c = job_directory
+def solve(c):
     ok = run_steps(c, [
         ("decomposePar",   f"decomposePar -force -case {c}"),
         ("rhoSimpleFoam",  f"mpirun -np {NP} rhoSimpleFoam -parallel -case {c}"),
         ("reconstructPar", f"reconstructPar -latestTime -case {c}"),
     ])
-    subprocess.run(f"rm -rf {c}/processor*", shell=True, executable="/bin/bash")
-    time_dirs = [d for d in os.listdir(c) if os.path.isdir(os.path.join(c, d))
-                 and _is_float(d) and float(d) > 0]
-    return ok and len(time_dirs) > 0
+    sh(f"rm -rf {c}/processor*")
+    return ok and latest_time(c) is not None
 
-def _is_float(s):
-    try:
-        float(s); return True
-    except ValueError:
-        return False
-
-def cleanup(job_directory):
-    subprocess.run(f"rm -rf {job_directory}/processor*", shell=True, executable="/bin/bash")
+def latest_time(case):
+    # Latest time directory after 0, None if there is none
+    times = []
+    for d in os.listdir(case):
+        try:
+            if float(d) > 0 and os.path.isdir(os.path.join(case, d)):
+                times.append(d)
+        except ValueError:
+            pass
+    return max(times, key=float) if times else None
 
 # ----------------------------------------------------------------------------
 # Metrics
 # ----------------------------------------------------------------------------
 
-def read_json(job_directory):
+def read_json(case):
     try:
-        with open(os.path.join(job_directory, "metrics.json")) as fh:
+        with open(os.path.join(case, "metrics.json")) as fh:
             return json.load(fh)
     except (OSError, ValueError):
-        return None
+        return {}
 
-def write_json(job_directory, data):
-    os.makedirs(job_directory, exist_ok=True)
-    with open(os.path.join(job_directory, "metrics.json"), "w") as fh:
+def write_json(case, data):
+    os.makedirs(case, exist_ok=True)
+    with open(os.path.join(case, "metrics.json"), "w") as fh:
         json.dump(data, fh, indent=2)
 
-def write_failure(job_directory, status, refs=None):
-    refs = {k: v for k, v in (refs or {}).items() if k != "status"}
-    write_json(job_directory, {"case": os.path.abspath(job_directory), "status": status,
-                               "converged": False, **refs})
-    cleanup(job_directory)
-    return None
-
-def convergence_metrics(job_directory, extra):
-    sys.path.insert(0, TOOLS_DIR)
+def convergence_metrics(case, refs):
+    # Iterative convergence over the last metrics.TAIL_FRACTION of the run. The capture p0 and the
+    # back pressure are imposed, so the mass flow and the capture static pressure are the free signals.
     import metrics
 
-    m = {"case": os.path.abspath(job_directory), "status": "ok", "converged": False,
-         "tail_fraction": metrics.TAIL_FRACTION,
-         "drift_tolerance_pct": metrics.DRIFT_TOLERANCE_PCT,
-         "mass_imbalance_tol_pct": MASS_IMBALANCE_TOL_PCT,
-         "mdot_osc_tol_pct": MDOT_OSC_TOL_PCT,
-         "p_cap_osc_tol_pct": P_CAP_OSC_TOL_PCT,
-         "mdot_target_tol_pct": MDOT_TARGET_TOL_PCT,
-         "cont_err_tol": CONT_ERR_TOL, **extra}
-
-    to, out = metrics._read_dat(job_directory, "massFlowOutlet", "surfaceFieldValue.dat", 2)
-    ti, inn = metrics._read_dat(job_directory, "massFlowInlet", "surfaceFieldValue.dat", 2)
-    if to is None or ti is None:
-        m["status"] = "no_data"
-        write_json(job_directory, m)
-        return m
-
-    so = metrics.window_stats(to, out[:, 0])
-    si = metrics.window_stats(ti, -inn[:, 0])          # inflow phi is negative
-    m["iterations"] = int(to[-1])
-    if so is None or si is None or so["n_samples"] < metrics.MIN_TAIL_SAMPLES:
-        m["status"] = "too_few_samples"
-        write_json(job_directory, m)
-        return m
-
-    # The capture p0 and the back pressure are imposed, so the mass flow and the capture static
-    # pressure are the free (convergence) signals
-    m["mdot_outlet_kg_s"]   = so["value"]
-    m["mdot_inlet_kg_s"]    = si["value"]
-    m["mdot_drift_pct"]     = so["drift_pct"]
-    m["mdot_osc_pct"]       = 50.0 * (so["max"] - so["min"]) / so["value"]    # half peak-to-peak
-    m["mdot_std_pct"]       = 100.0 * so["std"] / so["value"]
-    m["mass_imbalance_pct"] = 100.0 * (si["value"] - so["value"]) / so["value"]
-    m["mdot_ratio"]         = so["value"] / MDOT_TARGET
-    m["avg_window_start"]   = so["window_start"]
-    m["avg_window_end"]     = so["window_end"]
-
-    tp, pc = metrics._read_dat(job_directory, "inletPressure", "surfaceFieldValue.dat", 2)
+    m = {"case": os.path.abspath(case), **refs, "tail_fraction": metrics.TAIL_FRACTION,
+         "drift_tol_pct": metrics.DRIFT_TOLERANCE_PCT}
+    to, out = metrics._read_dat(case, "massFlowOutlet", "surfaceFieldValue.dat", 2)
+    ti, inn = metrics._read_dat(case, "massFlowInlet", "surfaceFieldValue.dat", 2)
+    tp, pc  = metrics._read_dat(case, "inletPressure", "surfaceFieldValue.dat", 2)
+    so = metrics.window_stats(to, out[:, 0]) if to is not None else None
+    si = metrics.window_stats(ti, -inn[:, 0]) if ti is not None else None    # inflow phi is negative
     sp = metrics.window_stats(tp, pc[:, 0]) if tp is not None else None
-    if sp:
-        m["p_cap_static_avg_Pa"] = sp["value"]
-        m["p_cap_osc_pct"]       = 50.0 * (sp["max"] - sp["min"]) / sp["value"]
-        m["p_cap_drift_pct"]     = sp["drift_pct"]
+    if not (so and si and sp) or so["n_samples"] < metrics.MIN_TAIL_SAMPLES:
+        m["failed_checks"] = ["no_data"]
+        return m
 
-    m["cont_err_avg"] = continuity_error(job_directory, so["window_start"])
-
-    m.update(metrics.read_yplus(job_directory, patch="wall"))
-    ya = m.get("yplus_avg")
-    m["yplus_in_range"] = ya is not None and YPLUS_RANGE[0] <= ya <= YPLUS_RANGE[1]
-
-    drift, imb, osc = m["mdot_drift_pct"], m["mass_imbalance_pct"], m["mdot_osc_pct"]
-    pdrift, posc, cerr = m.get("p_cap_drift_pct"), m.get("p_cap_osc_pct"), m["cont_err_avg"]
+    osc = lambda s: 50.0 * (s["max"] - s["min"]) / s["value"]          # half peak-to-peak [%]
+    m.update(
+        iterations=int(to[-1]), window_start=so["window_start"], window_end=so["window_end"],
+        mdot_outlet_kg_s=so["value"], mdot_inlet_kg_s=si["value"], mdot_ratio=so["value"] / MDOT_TARGET,
+        mdot_drift_pct=so["drift_pct"], mdot_osc_pct=osc(so),
+        mass_imbalance_pct=100.0 * (si["value"] - so["value"]) / so["value"],
+        p_cap_static_Pa=sp["value"], p_cap_drift_pct=sp["drift_pct"], p_cap_osc_pct=osc(sp),
+        cont_err_avg=continuity_error(case, so["window_start"]),
+        **metrics.read_yplus(case, patch="wall"),
+    )
+    drift_ok = lambda d: d is not None and abs(d) < metrics.DRIFT_TOLERANCE_PCT
     checks = {
-        "mdot_drift":       drift is not None and abs(drift) < metrics.DRIFT_TOLERANCE_PCT,
-        "mdot_oscillation": osc < MDOT_OSC_TOL_PCT,
-        "p_cap_drift":      pdrift is not None and abs(pdrift) < metrics.DRIFT_TOLERANCE_PCT,
-        "p_cap_oscillation": posc is not None and posc < P_CAP_OSC_TOL_PCT,
-        "imbalance":        abs(imb) < MASS_IMBALANCE_TOL_PCT,
-        "continuity":       cerr is not None and cerr < CONT_ERR_TOL,
+        "mdot_drift":        drift_ok(m["mdot_drift_pct"]),
+        "mdot_oscillation":  m["mdot_osc_pct"] < OSC_TOL_PCT,
+        "p_cap_drift":       drift_ok(m["p_cap_drift_pct"]),
+        "p_cap_oscillation": m["p_cap_osc_pct"] < OSC_TOL_PCT,
+        "imbalance":         abs(m["mass_imbalance_pct"]) < MASS_IMBALANCE_TOL_PCT,
+        "continuity":        m["cont_err_avg"] is not None and m["cont_err_avg"] < CONT_ERR_TOL,
     }
     m["failed_checks"] = [k for k, ok in checks.items() if not ok]
-    m["converged"] = not m["failed_checks"]
-    m["status"] = "ok" if m["converged"] else "not_converged"
-    # Mass flow is a result of the imposed pressures: flagged, not a convergence failure
     m["mdot_on_target"] = abs(m["mdot_ratio"] - 1.0) * 100.0 < MDOT_TARGET_TOL_PCT
-    if not m["yplus_in_range"]:
-        print(f"  WARNING: average y+ {ya} is outside {YPLUS_RANGE}, adjust TARGET_YPLUS")
-    write_json(job_directory, m)
+    m["yplus_in_range"] = m["yplus_avg"] is not None and YPLUS_RANGE[0] <= m["yplus_avg"] <= YPLUS_RANGE[1]
     return m
 
-def continuity_error(job_directory, t_start):
-    # Mean "sum local" continuity error from log.rhoSimpleFoam over iterations >= t_start
-    path = os.path.join(job_directory, "log.rhoSimpleFoam")
-    if not os.path.exists(path):
-        return None
+def continuity_error(case, t_start):
+    # Mean "sum local" continuity error in log.rhoSimpleFoam over iterations >= t_start
     vals, t = [], None
-    with open(path) as fh:
-        for line in fh:
-            if line.startswith("Time = "):
-                try:
+    try:
+        with open(os.path.join(case, "log.rhoSimpleFoam")) as fh:
+            for line in fh:
+                if line.startswith("Time = "):
                     t = float(line.split()[2])
-                except (IndexError, ValueError):
-                    t = None
-            elif line.startswith("time step continuity errors") and t is not None and t >= t_start:
-                try:
+                elif line.startswith("time step continuity errors") and t is not None and t >= t_start:
                     vals.append(float(line.split("sum local =")[1].split(",")[0]))
-                except (IndexError, ValueError):
-                    pass
+    except (OSError, ValueError, IndexError):
+        pass
     return sum(vals) / len(vals) if vals else None
 
-def physical_checks(job_directory, m):
-    # Run after ParaView: reject solutions that break the energy equation or create total pressure
-    checks = {}
-    if m.get("pt_recovery_duct") is not None:
-        checks["p0_gain"] = m["pt_recovery_duct"] < 1.0
-    if m.get("duct_T_max") is not None and m.get("T0_K") is not None:
-        checks["T_above_T0"] = m["duct_T_max"] <= m["T0_K"] + T0_MARGIN_K
-    if not checks:
-        checks["post_missing"] = False
-    m["failed_physical_checks"] = [k for k, ok in checks.items() if not ok]
-    m["failed_checks"] = list(m.get("failed_checks") or []) + m["failed_physical_checks"]
-    m["converged"] = not m["failed_checks"]
-    m["status"] = "ok" if m["converged"] else "not_converged"
+def physical_checks(m):
+    # Reject solutions that create total pressure or heat an adiabatic duct
+    if m.get("pt_recovery_duct") is None or m.get("duct_T_max") is None:
+        return ["post_missing"]
+    failed = []
+    if m["pt_recovery_duct"] >= 1.0:
+        failed.append("p0_gain")
+    if m["duct_T_max"] > m["T0_K"] + T0_MARGIN_K:
+        failed.append("T_above_T0")
+    return failed
 
-    if m.get("cap_p0_avg") and m.get("p0_capture_Pa"):
-        # The capture p0 is imposed now, so this is only a sanity check of the measurement plane
-        m["p0_cap_dev_pct"] = 100.0 * (m["cap_p0_avg"] / m["p0_capture_Pa"] - 1.0)
-        if abs(m["p0_cap_dev_pct"]) > P0_CAP_DEV_WARN_PCT:
-            print(f"  WARNING: capture p0 is {m['p0_cap_dev_pct']:+.1f} % from the imposed "
-                  f"{m['p0_capture_Pa']:.0f} Pa, check the capture measurement plane")
+def format_summary(m):
+    def f(key, spec=".4g"):
+        v = m.get(key)
+        return format(v, spec) if isinstance(v, (int, float)) and not isinstance(v, bool) else "n/a"
 
+    bar = "=" * 64
+    lines = [
+        "", bar, f" INLET METRICS   [{m.get('status', '?')}]", bar,
+        f"  LD {f('LD')} | AR {f('AR')} | WH {f('WH')} | c_cl {f('c_cl')} | c_area {f('c_area')}",
+        f"  iterations          {f('iterations', 'd')}   (window {f('window_start', '.0f')} -> {f('window_end', '.0f')})",
+        f"  mass flow out / in  {f('mdot_outlet_kg_s', '.4f')} / {f('mdot_inlet_kg_s', '.4f')} kg/s   "
+        f"target {f('mdot_target_kg_s', '.4f')}, ratio {f('mdot_ratio', '.4f')}"
+        f"{'' if m.get('mdot_on_target') else '  OFF TARGET'}",
+        f"  p0 capture / back p {f('p0_capture_Pa', '.0f')} / {f('p_back_Pa', '.0f')} Pa   "
+        f"(eta_duct est {f('eta_duct_est', '.4f')})",
+        "-" * 64,
+        f"  Mach  capture avg {f('cap_mach_avg', '.3f')} | engine face avg / max {f('ef_mach_avg', '.3f')} / "
+        f"{f('ef_mach_max', '.3f')} | duct max {f('duct_mach_max', '.3f')}",
+        f"  T     engine face avg {f('ef_T_avg', '.1f')} K | duct max {f('duct_T_max', '.1f')} K "
+        f"(T0 {f('T0_K', '.1f')})",
+        f"  p0 recovery duct / total   {f('pt_recovery_duct', '.4f')} / {f('pt_recovery_total', '.4f')}",
+        "  stations (x/L)      p avg [Pa]   p0 mass avg [Pa]   Mach avg",
+    ]
+    for s in m.get("stations", []):
+        lines.append(f"    {s['x_over_L']:6.2f}          {s['p_avg']:9.0f}   {s['p0_avg']:16.0f}   {s['mach_avg']:8.3f}")
+    lines += [
+        "-" * 64,
+        f"  mass flow drift / osc   {f('mdot_drift_pct', '+.4f')} / {f('mdot_osc_pct', '.4f')} %   "
+        f"(tol {f('drift_tol_pct', 'g')} / {OSC_TOL_PCT})",
+        f"  capture p drift / osc   {f('p_cap_drift_pct', '+.4f')} / {f('p_cap_osc_pct', '.4f')} %",
+        f"  mass imbalance          {f('mass_imbalance_pct', '+.4f')} %   (tol {MASS_IMBALANCE_TOL_PCT})",
+        f"  continuity error        {f('cont_err_avg', '.3g')}   (tol {CONT_ERR_TOL:g})",
+        f"  y+ min / avg / max      {f('yplus_min', '.1f')} / {f('yplus_avg', '.1f')} / {f('yplus_max', '.1f')}"
+        f"{'' if m.get('yplus_in_range') else '   OUT OF RANGE'}",
+        f"  mesh / solve time       {f('mesh_time_s', '.0f')} / {f('solve_time_s', '.0f')} s",
+        bar, f"  CONVERGED: {m.get('converged')}"
+        f"{'' if m.get('converged') else '   failed: ' + ', '.join(m.get('failed_checks', []))}", bar, "",
+    ]
+    return "\n".join(lines)
+
+def print_warnings(m):
     if m.get("mdot_ratio") is not None and not m.get("mdot_on_target"):
         hint = (f", try ETA_DUCT_EST = {m['pt_recovery_duct']:.4f} (the duct recovery of this run)"
                 if m.get("pt_recovery_duct") is not None else "")
-        print(f"  WARNING: mass flow is {100.0 * (m['mdot_ratio'] - 1.0):+.2f} % from the target "
+        print(f"WARNING: mass flow is {100.0 * (m['mdot_ratio'] - 1.0):+.2f} % from the target "
               f"{MDOT_TARGET:g} kg/s with ETA_DUCT_EST = {ETA_DUCT_EST}{hint}")
-    write_json(job_directory, m)
-    return m
+    if m.get("yplus_avg") is not None and not m.get("yplus_in_range"):
+        print(f"WARNING: average y+ {m['yplus_avg']:.1f} is outside {YPLUS_RANGE}, adjust TARGET_YPLUS")
+    if not m.get("converged"):
+        print(f"WARNING: failed {m.get('failed_checks')}, treat this result as unusable")
 
-def format_summary(m):
-    def f(key, spec=".4g", default="n/a"):
-        v = m.get(key)
-        return format(v, spec) if isinstance(v, (int, float)) and not isinstance(v, bool) else default
-
-    bar = "=" * 60
-    return "\n".join([
-        "", bar, f" INLET METRICS   [{m.get('status', '?')}]", bar,
-        f"  LD {f('LD')} | AR {f('AR')} | WH {f('WH')} | c_cl {f('c_cl')} | c_area {f('c_area')}",
-        f"  iterations        :  {f('iterations', 'd')}",
-        "-" * 60,
-        f"  mass flow target  :  {f('mdot_target_kg_s', '.4f')} kg/s",
-        f"  mass flow out/in  :  {f('mdot_outlet_kg_s', '.4f')} / {f('mdot_inlet_kg_s', '.4f')} kg/s"
-        f"   (ratio {f('mdot_ratio', '.4f')}{'' if m.get('mdot_on_target') else ', OFF TARGET'})",
-        f"  back pressure     :  {f('p_back_Pa', '.1f')} Pa   (fixed, eta_duct est {f('eta_duct_est', '.3f')})",
-        f"  capture p0        :  {f('cap_p0_avg', '.1f')} Pa   (imposed {f('p0_capture_Pa', '.1f')}, "
-        f"{f('p0_cap_dev_pct', '+.2f')} %)",
-        "-" * 60,
-        f"  flow metrics from :  {'mean fields' if m.get('fields_averaged') else 'LAST ITERATION (no mean fields)'}"
-        f", iterations {f('avg_window_start', '.0f')} -> {f('avg_window_end', '.0f')}",
-        f"  capture   Mach avg          :  {f('cap_mach_avg', '.4f')}",
-        f"  engine    Mach avg / max    :  {f('ef_mach_avg', '.4f')} / {f('ef_mach_max', '.4f')}",
-        f"  engine    T avg             :  {f('ef_T_avg', '.2f')} K",
-        f"  engine    p avg / max       :  {f('ef_p_avg', '.1f')} / {f('ef_p_max', '.1f')} Pa",
-        f"  engine    p0 (mass avg)     :  {f('ef_p0_avg', '.1f')} Pa",
-        f"  duct      Mach avg / max    :  {f('duct_mach_avg', '.4f')} / {f('duct_mach_max', '.4f')}",
-        f"  duct      T avg / max       :  {f('duct_T_avg', '.2f')} / {f('duct_T_max', '.2f')} K",
-        f"  duct      p avg / max       :  {f('duct_p_avg', '.1f')} / {f('duct_p_max', '.1f')} Pa",
-        f"  p0 recovery duct / total    :  {f('pt_recovery_duct', '.4f')} / {f('pt_recovery_total', '.4f')}",
-        "-" * 60,
-        f"  mass flow drift   :  {f('mdot_drift_pct', '+.4f')} %   (tol {f('drift_tolerance_pct', '.2f')})",
-        f"  mass flow osc     :  {f('mdot_osc_pct', '.4f')} %   (tol {f('mdot_osc_tol_pct', '.2f')}, "
-        f"std {f('mdot_std_pct', '.4f')} %)",
-        f"  capture p drift   :  {f('p_cap_drift_pct', '+.4f')} %   (tol {f('drift_tolerance_pct', '.2f')})",
-        f"  capture p osc     :  {f('p_cap_osc_pct', '.4f')} %   (tol {f('p_cap_osc_tol_pct', '.2f')})",
-        f"  mass imbalance    :  {f('mass_imbalance_pct', '+.4f')} %   (tol {f('mass_imbalance_tol_pct', '.2f')})",
-        f"  continuity error  :  {f('cont_err_avg', '.3g')}   (tol {f('cont_err_tol', '.0e')})",
-        f"  y+  min/avg/max   :  {f('yplus_min', '.1f')} / {f('yplus_avg', '.1f')} / {f('yplus_max', '.1f')}"
-        f"   (target avg {YPLUS_RANGE[0]:g}-{YPLUS_RANGE[1]:g}"
-        f"{'' if m.get('yplus_in_range') else ', OUT OF RANGE'})",
-        f"  mesh / solve time :  {f('mesh_time_s', '.1f')} / {f('solve_time_s', '.1f')} s",
-        bar, f"  CONVERGED: {m.get('converged')}"
-        f"{'' if m.get('converged') else '   failed: ' + ', '.join(m.get('failed_checks') or [])}", bar, "",
-    ])
-
-def plot_convergence(job_directory):
+def plot_convergence(case):
     try:
-        sys.path.insert(0, TOOLS_DIR)
         import glob
         import matplotlib
         matplotlib.use("Agg")
         import matplotlib.pyplot as plt
         import metrics
 
-        images = os.path.join(job_directory, "images")
+        images = os.path.join(case, "images")
         os.makedirs(images, exist_ok=True)
 
-        # Mass flow
-        to, out = metrics._read_dat(job_directory, "massFlowOutlet", "surfaceFieldValue.dat", 2)
-        ti, inn = metrics._read_dat(job_directory, "massFlowInlet", "surfaceFieldValue.dat", 2)
+        to, out = metrics._read_dat(case, "massFlowOutlet", "surfaceFieldValue.dat", 2)
+        ti, inn = metrics._read_dat(case, "massFlowInlet", "surfaceFieldValue.dat", 2)
         if to is not None and ti is not None:
             t_cut = to[0] + (1.0 - metrics.TAIL_FRACTION) * (to[-1] - to[0])
             plt.figure(figsize=(8, 5))
             plt.plot(ti, -inn[:, 0], linewidth=1.2, label="capture plane")
             plt.plot(to, out[:, 0], linewidth=1.2, label="outlet")
-            plt.axhline(MDOT_TARGET, color="k", linestyle="--", linewidth=1.0,
-                        label=f"target {MDOT_TARGET:g} kg/s")
+            plt.axhline(MDOT_TARGET, color="k", linestyle="--", linewidth=1.0, label=f"target {MDOT_TARGET:g} kg/s")
             plt.axvspan(t_cut, to[-1], color="0.6", alpha=0.25,
-                        label=f"averaging window (last {100*metrics.TAIL_FRACTION:.0f}%)")
+                        label=f"convergence window (last {100 * metrics.TAIL_FRACTION:.0f}%)")
             tail = out[to >= t_cut, 0]
-            if len(tail) > 1:
-                lo = min(tail.min(), MDOT_TARGET); hi = max(tail.max(), MDOT_TARGET)
-                pad = max(0.5 * (hi - lo), 0.02 * hi)
-                plt.ylim(lo - pad, hi + pad)
-            plt.xlabel("Iteration")
-            plt.ylabel("Mass flow (kg/s)")
-            plt.title("Mass Flow Convergence")
-            plt.grid(True, linestyle="--", alpha=0.7)
-            plt.legend(fontsize=8)
+            lo, hi = min(tail.min(), MDOT_TARGET), max(tail.max(), MDOT_TARGET)
+            pad = max(0.5 * (hi - lo), 0.02 * hi)
+            plt.ylim(lo - pad, hi + pad)
+            plt.xlabel("Iteration"); plt.ylabel("Mass flow (kg/s)"); plt.title("Mass Flow Convergence")
+            plt.grid(True, linestyle="--", alpha=0.7); plt.legend(fontsize=8)
             plt.savefig(os.path.join(images, "convergence_mass_flow.png"), dpi=200, bbox_inches="tight")
             plt.close()
 
-        # Residuals
-        files = sorted(glob.glob(os.path.join(job_directory, "postProcessing", "*", "*", "solverInfo.dat")),
-                       key=metrics._start_time)
+        # Initial residuals from solverInfo (columns "<field>_initial"), restarts keep the first value
         residuals = {}
-        for path in files:
+        for path in sorted(glob.glob(os.path.join(case, "postProcessing", "residuals", "*", "solverInfo.dat")),
+                           key=metrics._start_time):
             with open(path) as fh:
                 lines = fh.readlines()
             header = next((l for l in lines if l.startswith("# Time")), None)
@@ -695,40 +555,32 @@ def plot_convergence(job_directory):
                 if line.startswith("#") or len(parts) != len(cols):
                     continue
                 for name, idx in fields.items():
-                    t_list, v_list = residuals.setdefault(name, ([], []))
-                    if t_list and float(parts[0]) <= t_list[-1]:
-                        continue
+                    t, v = residuals.setdefault(name, ([], []))
                     try:
-                        v_list.append(float(parts[idx])); t_list.append(float(parts[0]))
+                        if not t or float(parts[0]) > t[-1]:
+                            v.append(float(parts[idx])); t.append(float(parts[0]))
                     except ValueError:
                         pass
         if residuals:
             plt.figure(figsize=(9, 6))
             for name, (t, v) in sorted(residuals.items()):
                 plt.semilogy(t, v, label=name, linewidth=1.0)
-            plt.xlabel("Iteration")
-            plt.ylabel("Initial Residual")
-            plt.title("Residual Convergence")
-            plt.grid(True, which="both", linestyle="--", alpha=0.5)
-            plt.legend()
+            plt.xlabel("Iteration"); plt.ylabel("Initial Residual"); plt.title("Residual Convergence")
+            plt.grid(True, which="both", linestyle="--", alpha=0.5); plt.legend()
             plt.savefig(os.path.join(images, "residuals.png"), dpi=200, bbox_inches="tight")
             plt.close()
     except Exception as e:
-        print(f"Warning: Could not plot convergence histories. Error: {e}")
+        print(f"Warning: could not plot convergence histories: {e}")
 
-def post_process(job_directory):
-    job_id = os.path.basename(os.path.normpath(job_directory))
-    foam = os.path.join(job_directory, f"{job_id}.foam")
-    images = os.path.join(job_directory, "images")
-    log = os.path.join(job_directory, "log.pvbatch")
-    command = (f"LIBGL_ALWAYS_SOFTWARE=1 pvbatch --force-offscreen-rendering "
-               f"{os.path.abspath(__file__)} post {foam} {images} > {log} 2>&1")
-    result = subprocess.run(command, shell=True, executable="/bin/bash")
-    if result.returncode != 0:
-        print(f"Post-processing failed, see {log}")
-        subprocess.run(f"tail -n 30 {log}", shell=True, executable="/bin/bash")
-        return False
-    return True
+def post_process(case):
+    name = os.path.basename(os.path.normpath(case))
+    log = os.path.join(case, "log.pvbatch")
+    rc = sh(f"LIBGL_ALWAYS_SOFTWARE=1 pvbatch --force-offscreen-rendering {os.path.abspath(__file__)} "
+            f"post {os.path.join(case, name + '.foam')} {os.path.join(case, 'images')} > {log} 2>&1")
+    if rc != 0:
+        print(f"  post processing failed, last lines of {log}:")
+        sh(f"tail -n 30 {log}")
+    return rc == 0
 
 # ----------------------------------------------------------------------------
 # ParaView post processing (runs under pvbatch)
@@ -736,49 +588,29 @@ def post_process(job_directory):
 
 def paraview_post(foam, images):
     from paraview import servermanager
-    from paraview.simple import (OpenDataFile, Calculator, Slice, Clip, IntegrateVariables,
-                                 CreateView, Show, ColorBy, GetColorTransferFunction,
-                                 GetScalarBar, Render, SaveScreenshot, Delete)
+    from paraview.simple import (OpenDataFile, Calculator, Slice, Clip, Transform, Text,
+                                 IntegrateVariables, CreateView, Show, ColorBy,
+                                 GetColorTransferFunction, GetScalarBar, Render, SaveScreenshot, Delete)
 
     os.makedirs(images, exist_ok=True)
     case = os.path.dirname(os.path.abspath(foam))
-    m = read_json(case) or {}
+    m = read_json(case)
 
-    # Window-averaged fields from fieldAverage when the latest time has them, else the last iteration
-    time_dirs = [d for d in os.listdir(case) if os.path.isdir(os.path.join(case, d))
-                 and _is_float(d) and float(d) > 0]
-    latest = max(time_dirs, key=float) if time_dirs else None
-    averaged = latest is not None and all(
-        os.path.exists(os.path.join(case, latest, f)) for f in ("UMean", "pMean", "TMean"))
-    sfx = "Mean" if averaged else ""
-    U_, p_, T_ = f"U{sfx}", f"p{sfx}", f"T{sfx}"
-    if not averaged:
-        print("WARNING: no UMean/pMean/TMean in the latest time, using the last iteration")
-
+    # Converged steady solution: the last written iteration
     reader = OpenDataFile(foam)
     reader.MeshRegions = ["internalMesh"]
-    reader.CellArrays = [p_, T_, U_]
+    reader.CellArrays = ["p", "T", "U"]
     reader.UpdatePipelineInformation()
-    times = reader.TimestepValues
-    times = list(times) if hasattr(times, "__len__") else [times]
-    t = times[-1] if times else 0.0
-
-    # Copy the chosen fields to plain names so everything below is the same either way
-    src = reader
-    if averaged:
-        for name, fn in [("p", p_), ("T", T_), ("U", U_)]:
-            src = Calculator(Input=src)
-            src.AttributeType = "Cell Data"
-            src.ResultArrayName = name
-            src.Function = fn
+    t = float(latest_time(case))
 
     # Derived cell fields (perfect gas, same gamma / R as the 1D estimates)
+    src = reader
     for name, fn in [
-        ("Mach",    f"mag(U)/sqrt({GAMMA}*{R_GAS}*T)"),
-        ("rho",     f"p/({R_GAS}*T)"),
+        ("Mach",     f"mag(U)/sqrt({GAMMA}*{R_GAS}*T)"),
+        ("rho",      f"p/({R_GAS}*T)"),
         ("massFlux", "rho*U_X"),
-        ("p0",      f"p*(1+{0.5*(GAMMA-1):g}*Mach*Mach)^{GAMMA/(GAMMA-1):g}"),
-        ("p0Flux",  "p0*massFlux"),
+        ("p0",       f"p*(1+{0.5 * (GAMMA - 1):g}*Mach*Mach)^{GAMMA / (GAMMA - 1):g}"),
+        ("p0Flux",   "p0*massFlux"),
     ]:
         src = Calculator(Input=src)
         src.AttributeType = "Cell Data"
@@ -795,101 +627,79 @@ def paraview_post(foam, images):
         Delete(integ)
         return vals
 
-    def plane(prefix, x):
+    def cut(origin, normal):
         s = Slice(Input=src)
         s.SliceType = "Plane"
-        s.SliceType.Origin = [x, 0.0, 0.0]
-        s.SliceType.Normal = [1.0, 0.0, 0.0]
+        s.SliceType.Origin = origin
+        s.SliceType.Normal = normal
         s.UpdatePipeline(t)
+        return s
+
+    def plane_stats(s):
         I = integrate(s)
         A, mdot = I["Area"], I["massFlux"]
-        out = {
-            f"{prefix}_area_m2": A,
-            f"{prefix}_mdot_kg_s": mdot,
-            f"{prefix}_mach_avg": I["Mach"] / A,
-            f"{prefix}_mach_max": s.CellData["Mach"].GetRange()[1],
-            f"{prefix}_T_avg": I["T"] / A,
-            f"{prefix}_p_avg": I["p"] / A,
-            f"{prefix}_p_max": s.CellData["p"].GetRange()[1],
-            f"{prefix}_p0_avg": I["p0Flux"] / mdot,       # mass-weighted
-        }
-        Delete(s)
-        return out
+        return {"area_m2": A, "mdot_kg_s": mdot, "mach_avg": I["Mach"] / A,
+                "mach_max": s.CellData["Mach"].GetRange()[1], "T_avg": I["T"] / A,
+                "p_avg": I["p"] / A, "p_max": s.CellData["p"].GetRange()[1],
+                "p0_avg": I["p0Flux"] / mdot}                  # p0 mass-weighted
 
-    x_lip = m.get("x_lip_m"); x_ef = m.get("x_engine_face_m")
-    if x_lip is None or x_ef is None:
-        b = src.GetDataInformation().GetBounds()
-        x_lip, x_ef = b[0], b[1]
-
+    x_lip, x_ef, L = m["x_lip_m"], m["x_engine_face_m"], m["duct_length_m"]
     stats = {}
-    stats.update(plane("cap", x_lip + X_OFFSET))
-    stats.update(plane("ef", x_ef + X_OFFSET))
+
+    # Capture plane and engine face, and the front-view stations in between
+    for prefix, x in (("cap", x_lip + X_OFFSET), ("ef", x_ef + X_OFFSET)):
+        s = cut([x, 0, 0], [1, 0, 0])
+        stats.update({f"{prefix}_{k}": v for k, v in plane_stats(s).items()})
+        Delete(s)
+    stations = []
+    for f in SLICE_STATIONS:
+        x = min(max(x_lip + f * L, x_lip + X_OFFSET), x_ef - X_OFFSET)
+        s = cut([x, 0, 0], [1, 0, 0])
+        stations.append((f, x, s))
+    stats["stations"] = [{"x_over_L": f, "x_m": x, **plane_stats(s)} for f, x, s in stations]
 
     # Volume statistics over the S-duct only (capture plane to engine face, no extension)
     clip = Clip(Input=src)
     clip.ClipType = "Plane"
     clip.ClipType.Origin = [x_ef, 0.0, 0.0]
     clip.ClipType.Normal = [1.0, 0.0, 0.0]
-    clip.Invert = 1
+    clip.Invert = 1                          # keep x < x_ef
     clip.UpdatePipeline(t)
-    if clip.GetDataInformation().GetBounds()[1] > x_ef + 1e-3:
-        clip.Invert = 0
-        clip.UpdatePipeline(t)
     I = integrate(clip)
     V = I["Volume"]
-    stats.update({
-        "duct_volume_m3": V,
-        "duct_mach_avg": I["Mach"] / V,
-        "duct_mach_max": clip.CellData["Mach"].GetRange()[1],
-        "duct_T_avg": I["T"] / V,
-        "duct_T_max": clip.CellData["T"].GetRange()[1],
-        "duct_p_avg": I["p"] / V,
-        "duct_p_max": clip.CellData["p"].GetRange()[1],
-    })
+    stats.update(duct_volume_m3=V, duct_mach_avg=I["Mach"] / V,
+                 duct_mach_max=clip.CellData["Mach"].GetRange()[1],
+                 duct_T_avg=I["T"] / V, duct_T_max=clip.CellData["T"].GetRange()[1],
+                 duct_p_avg=I["p"] / V, duct_p_max=clip.CellData["p"].GetRange()[1])
     Delete(clip)
 
-    if stats.get("cap_p0_avg"):
-        stats["pt_recovery_duct"] = stats["ef_p0_avg"] / stats["cap_p0_avg"]
-    if stats.get("pt_recovery_duct") is not None:
-        # The capture p0 is a result now, so chain the assumed 2D recovery with the duct ratio
-        stats["pt_recovery_total"] = m.get("pt_recovery_2d", PT_RECOVERY_2D) * stats["pt_recovery_duct"]
+    stats["pt_recovery_duct"] = stats["ef_p0_avg"] / stats["cap_p0_avg"]
+    stats["pt_recovery_total"] = m["pt_recovery_2d"] * stats["pt_recovery_duct"]
     stats["post_time"] = t
-    stats["fields_averaged"] = averaged
-
     m.update(stats)
     write_json(case, m)
     print(json.dumps(stats, indent=2))
 
-    # Side slices (y = 0 plane, viewed from -y)
-    side = Slice(Input=src)
-    side.SliceType = "Plane"
-    side.SliceType.Origin = [0.0, Y_SLICE, 0.0]
-    side.SliceType.Normal = [0.0, 1.0, 0.0]
-    side.UpdatePipeline(t)
-    b = side.GetDataInformation().GetBounds()
-
-    # Parallel camera, the slice fills the left ~85 % and the colour bar sits on the right
+    # ---- images ----
     aspect = VIEW_SIZE[0] / VIEW_SIZE[1]
-    xspan, zspan = b[1] - b[0], b[5] - b[4]
-    scale = max(0.5 * zspan / 0.85, xspan / (0.84 * 2.0 * aspect))
-    width = 2.0 * scale * aspect
-    focal = [b[0] - 0.03 * width + 0.5 * width, 0.0, 0.5 * (b[4] + b[5])]
 
-    def view():
+    def view(position, focal, scale):
         rv = CreateView("RenderView")
         rv.ViewSize = VIEW_SIZE
         rv.ViewTime = t
         rv.OrientationAxesVisibility = 0
-        rv.CameraPosition = [focal[0], -1.0, focal[2]]
+        rv.CameraPosition = position
         rv.CameraFocalPoint = focal
         rv.CameraViewUp = [0, 0, 1]
         rv.CameraParallelProjection = 1
         rv.CameraParallelScale = scale
         return rv
 
-    def scalar_bar(display, rv, array, title):
-        display.SetScalarBarVisibility(rv, True)
+    def color(display, rv, array, title, lo, hi):
+        ColorBy(display, ("CELLS", array))
         lut = GetColorTransferFunction(array)
+        lut.RescaleTransferFunction(lo, hi)
+        display.SetScalarBarVisibility(rv, True)
         bar = GetScalarBar(lut, rv)
         bar.WindowLocation = "Any Location"
         bar.Orientation = "Vertical"
@@ -899,7 +709,6 @@ def paraview_post(foam, images):
         bar.TitleFontSize = SCALAR_BAR["title_size"]
         bar.LabelFontSize = SCALAR_BAR["label_size"]
         bar.TitleBold = 1
-        lo, hi = lut.RGBPoints[0], lut.RGBPoints[-4]
         n = SCALAR_BAR["n_labels"]
         bar.UseCustomLabels = 1
         bar.CustomLabels = [lo + (hi - lo) * i / (n - 1) for i in range(1, n - 1)]
@@ -908,26 +717,68 @@ def paraview_post(foam, images):
         bar.Title = title
         bar.ComponentTitle = ""
 
-    for array, title, fname in [("Mach", "Mach", "slice-mach-side.png"),
-                                ("p", "p [Pa]", "slice-pressure-side.png")]:
-        rv = view()
-        d = Show(side, rv)
-        ColorBy(d, ("CELLS", array))
-        lo, hi = side.CellData[array].GetRange()
-        GetColorTransferFunction(array).RescaleTransferFunction(lo, hi)
-        scalar_bar(d, rv, array, title)
+    def save(rv, fname):
         Render(rv)
         SaveScreenshot(os.path.join(images, fname), rv, ImageResolution=VIEW_SIZE)
         Delete(rv)
 
-    # Mesh on the side slice
-    rv = view()
+    # Side view: y = 0 slice seen from -y, the slice fills the left ~85 %, colour bar on the right
+    side = cut([0.0, Y_SLICE, 0.0], [0, 1, 0])
+    b = side.GetDataInformation().GetBounds()
+    scale = max(0.5 * (b[5] - b[4]) / 0.85, (b[1] - b[0]) / (0.84 * 2.0 * aspect))
+    width = 2.0 * scale * aspect
+    focal = [b[0] - 0.03 * width + 0.5 * width, 0.0, 0.5 * (b[4] + b[5])]
+    side_view = lambda: view([focal[0], -1.0, focal[2]], focal, scale)
+    for array, title, fname in [("Mach", "Mach", "slice-mach-side.png"),
+                                ("p", "p [Pa]", "slice-pressure-side.png")]:
+        rv = side_view()
+        color(Show(side, rv), rv, array, title, *side.CellData[array].GetRange())
+        save(rv, fname)
+    rv = side_view()
     d = Show(side, rv)
     d.Representation = "Surface With Edges"
     ColorBy(d, None)
-    Render(rv)
-    SaveScreenshot(os.path.join(images, "mesh-side.png"), rv, ImageResolution=VIEW_SIZE)
-    Delete(rv)
+    save(rv, "mesh-side.png")
+
+    # Front view: the station slices side by side, looking downstream (from upstream of the capture
+    # plane), capture plane on the left, one colour range per field so the stations compare directly.
+    # Looking along +x with z up, screen-right is -y, so slice i is moved to y = -i * pitch.
+    bounds = [s.GetDataInformation().GetBounds() for _, _, s in stations]
+    w_max = max(bb[3] - bb[2] for bb in bounds)
+    h_max = max(bb[5] - bb[4] for bb in bounds)
+    pitch = 1.25 * w_max
+    moved = []
+    for i, ((f, x, s), bb) in enumerate(zip(stations, bounds)):
+        tr = Transform(Input=s)
+        tr.Transform = "Transform"
+        tr.Transform.Translate = [x_lip - x, -i * pitch - 0.5 * (bb[2] + bb[3]), -0.5 * (bb[4] + bb[5])]
+        tr.UpdatePipeline(t)
+        moved.append(tr)
+    n = len(moved)
+    row_w = (n - 1) * pitch + w_max
+    scale = max(0.5 * h_max / 0.6, row_w / (0.82 * 2.0 * aspect))
+    width = 2.0 * scale * aspect
+    y_focal = -0.5 * (n - 1) * pitch - 0.075 * width          # row centred in the left ~85 %
+
+    for array, title, fname in [("p", "p [Pa]", "slices-pressure-front.png"),
+                                ("p0", "p0 [Pa]", "slices-total-pressure-front.png")]:
+        lo = min(s.CellData[array].GetRange()[0] for _, _, s in stations)
+        hi = max(s.CellData[array].GetRange()[1] for _, _, s in stations)
+        rv = view([x_lip - 1.0, y_focal, 0.0], [x_lip, y_focal, 0.0], scale)
+        for tr in moved:
+            color(Show(tr, rv), rv, array, title, lo, hi)
+        for i, f in enumerate(SLICE_STATIONS):
+            label = Text(Text=f"x/L = {f:g}")
+            ld = Show(label, rv)
+            ld.WindowLocation = "Any Location"
+            ld.FontSize = 40
+            # screen position of panel i: offset (y_focal - y_i) to the right of the centre
+            ld.Position = [0.5 + (y_focal + i * pitch) / width - 0.04, 0.5 - 0.5 * h_max / (2 * scale) - 0.12]
+        title_text = Text(Text="Looking downstream: capture plane (left) to engine face (right)")
+        td = Show(title_text, rv)
+        td.WindowLocation = "Upper Center"
+        td.FontSize = 40
+        save(rv, fname)
 
 if __name__ == "__main__":
     if len(sys.argv) >= 2 and sys.argv[1] == "post":

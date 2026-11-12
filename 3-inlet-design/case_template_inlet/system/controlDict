@@ -59,7 +59,7 @@ functions
         operation       sum;
         fields          (phi);
     }
-    // Area-averaged static pressure at the capture plane (free there, the outlet p is fixed)
+    // Area-averaged static pressure at the capture plane (a result, p0 is imposed there)
     inletPressure
     {
         type            surfaceFieldValue;
@@ -72,22 +72,6 @@ functions
         name            inlet;
         operation       areaAverage;
         fields          (p);
-    }
-    // Mean fields over the convergence window, used for all reported flow metrics
-    fieldAverage
-    {
-        type            fieldAverage;
-        libs            (fieldFunctionObjects);
-        timeStart       7200;           // start of the averaging window, set by run_inlet.py
-        writeControl    writeTime;
-        restartOnRestart false;
-        periodicRestart  false;
-        fields
-        (
-            U { mean on; prime2Mean off; base iteration; }
-            p { mean on; prime2Mean off; base iteration; }
-            T { mean on; prime2Mean off; base iteration; }
-        );
     }
     MachNo
     {
