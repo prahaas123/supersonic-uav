@@ -1,7 +1,4 @@
-# Aerodynamic Design of a Small-Scale Supersonic UAV Powered by a Rotating Detonation Engine
-
-**Research Project — Aerodynamic Design Focus**  
-*Status: In Progress*
+# Aerodynamic Design of a Small-Scale Supersonic UAV
 
 ---
 
@@ -102,9 +99,17 @@
 
 ![Design 543](0-results/design543/geometry-diagonal.png)
 
-## 9. Next steps
+## 9. Inlet Optimization & Design
 
-- Inlet geometry optimization, to confirm the inlet delivers the pressure and velocity the RDE needs.
+- Parametric S-duct model in Python ([build_inlet.py](3-inlet-design/build_inlet.py)), 5 design variables and an automatic geometry validity check.
+- CFD case template ([run_inlet.py](3-inlet-design/run_inlet.py)): OpenFOAM `rhoSimpleFoam`, RANS k-ω SST with wall functions. Validated using a baseline design
+- Design space exploration: 60 designs sampled by Latin hypercube over the 5 variables ([dse.py](3-inlet-design/dse.py)). No seperate optimizer becuase the design space is small enough.
+- Design 36 picked: 98.5% pressure recovery (best of the 60), uniform pressure distributation at the engine inlet, no seperation, and smooth goemetry
+
+![Design 36 pressure side view](0-results/inlet_design_36/slice-pressure-side.png)
+
+## Next Steps
+
 - Final aerodynamic surface design.
 - Checks on the final design:
   - multiple mach numbers and AoAs
