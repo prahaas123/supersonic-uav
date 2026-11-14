@@ -101,11 +101,12 @@ snapControls
     multiRegionFeatureSnap true;
 }
 
-// Prism layers: first cell height and total thickness (absolute), the inlet lip and duct walls get
-// fewer, thinner layers; the engine face and exhaust get none
+// Prism layers: final layer thickness and growth ratio relative to the local surface cell size, so
+// the stack stays ~1 cell thick on every refinement level; the inlet lip and duct walls get fewer
+// layers; the engine face and exhaust get none
 addLayersControls
 {
-    relativeSizes false;
+    relativeSizes true;
     layers
     {
         airframe
@@ -115,21 +116,18 @@ addLayersControls
         "(inlet_lip|inlet_duct)"
         {
             nSurfaceLayers      $nLayersDuct;
-            thicknessModel      firstAndOverall;
-            firstLayerThickness $firstLayerThickness;
-            thickness           $layerThicknessDuct;
-            minThickness        $minLayerThickness;  // required per patch once a thickness model is given
         }
     }
 
-    thicknessModel firstAndOverall;
-    firstLayerThickness $firstLayerThickness;
-    thickness $layerThickness;
+    thicknessModel finalAndExpansion;
+    expansionRatio $expansionRatio;
+    finalLayerThickness $finalLayerThickness;
     minThickness $minLayerThickness;
     nGrow 0;
     featureAngle 130;
     slipFeatureAngle 30;
-    nRelaxIter 5;
+    nRelaxIter 10;           // more displacement-scaling attempts before a point's layers are dropped
+    nRelaxedIter 20;         // after 20 layer iterations use the relaxed quality criteria
     nSmoothSurfaceNormals 1;
     nSmoothNormals 3;
     nSmoothThickness 10;

@@ -73,26 +73,30 @@ N_CELLS_BETWEEN_LEVELS = 3
 RESOLVE_FEATURE_ANGLE  = 30.0    # [deg] surfaces curving more than this get the minimum size
 
 # volume refinement boxes, body axes: name -> (min corner, max corner, cell size [m])
-# Extended upward and rearward of the STAR-CCM+ boxes to follow the shocks (Mach angle 41.8 deg at
-# Mach 1.5) and the wake / plume further, plus a 6.25 mm box around the vehicle. Vehicle extent:
-# x -0.246 .. 1.425, |y| <= 0.554, z -0.07 .. 0.30. Estimated ~3.5 M box cells on the half model
-# (~5 M with surface refinement and prism layers), against ~0.75 M box cells with the STAR-CCM+ boxes.
+# Extended upward, downward and rearward of the STAR-CCM+ boxes to follow the shocks (Mach angle
+# 41.8 deg at Mach 1.5) and the wake / plume further, plus a 6.25 mm box around the vehicle that also
+# covers the belly shocks. Vehicle extent: x -0.246 .. 1.425, |y| <= 0.554, z -0.07 .. 0.30. The 4.5 M
+# cell half mesh (2026-11-14) grows by ~0.6 M from the lower box bottoms.
 REFINEMENT_BOXES = {
     "refineFar":   ((-0.80, -1.40,  -1.10),  (6.00, 1.40,  2.40), 0.05),      # STAR: x 4.00, z 1.40
-    "refineMid":   ((-0.50, -0.85,  -0.40),  (3.60, 0.85,  1.30), 0.025),     # STAR: x 2.40, z 0.65
-    "refineNear":  ((-0.32, -0.65,  -0.12),  (2.40, 0.65,  0.65), 0.0125),    # STAR: x 1.60, z 0.36
-    "refineBody":  ((-0.30, -0.60,  -0.08),  (1.75, 0.60,  0.34), 0.00625),   # new
+    "refineMid":   ((-0.50, -0.85,  -0.60),  (3.60, 0.85,  1.30), 0.025),     # STAR: x 2.40, z 0.65
+    "refineNear":  ((-0.32, -0.65,  -0.30),  (2.40, 0.65,  0.65), 0.0125),    # STAR: x 1.60, z 0.36
+    "refineBody":  ((-0.30, -0.60,  -0.16),  (1.75, 0.60,  0.34), 0.00625),   # new
     "refineInlet": (( 0.62, -0.07,  -0.045), (1.06, 0.07,  0.20), 0.003125),  # STAR: z 0.14 (lip shock / spillage)
     "refinePlume": (( 1.38, -0.15,  -0.15),  (2.60, 0.15,  0.15), 0.00625),   # STAR: x 1.80, +/-0.12
 }
 
 # prism layers: airframe, then inlet lip + duct walls (engine face and exhaust get none)
-PRISM_LAYERS         = 8
-PRISM_FIRST_CELL     = 6.0e-4    # [m]
-PRISM_TOTAL          = 0.010     # [m]
-PRISM_LAYERS_DUCT    = 6
-PRISM_TOTAL_DUCT     = 0.005     # [m]
-PRISM_MIN_THICKNESS  = 1.0e-4    # snappyHexMesh removes layers thinner than this [m]
+# Sized relative to the local surface cell (relativeSizes) so the stack is ~1 cell thick everywhere.
+# snappyHexMesh cannot push a stack much thicker than the surface cells into the castellated mesh:
+# the earlier absolute 10 mm / 5 mm stacks on 0.4-3 mm cells kept only ~28% of the wall faces.
+# Final layer 0.3 cell, growth 1.2 -> first cell ~0.45 mm on the 3.125 mm airframe cells (y+ ~100),
+# ~0.23 mm on 1.56 mm cells, ~0.07 mm on the 0.39 mm lip; nutUSpaldingWallFunction covers that range.
+PRISM_LAYERS         = 5
+PRISM_LAYERS_DUCT    = 4
+PRISM_EXPANSION      = 1.2
+PRISM_FINAL_REL      = 0.3       # outermost layer / local surface cell size
+PRISM_MIN_REL        = 0.1       # snappyHexMesh removes stacks thinner than this x local cell size
 
 LOCATION_IN_MESH = (-4.0123, 2.0123, 2.0123)   # any point in the fluid with y > 0
 
@@ -358,8 +362,7 @@ def mesh_settings(half):
         base_size=BASE_SIZE, surface_sizes=SURFACE_SIZES, feature_edge_size=FEATURE_EDGE_SIZE,
         n_cells_between_levels=N_CELLS_BETWEEN_LEVELS, resolve_feature_angle=RESOLVE_FEATURE_ANGLE,
         refinement_boxes=REFINEMENT_BOXES,
-        prism=[PRISM_LAYERS, PRISM_FIRST_CELL, PRISM_TOTAL, PRISM_LAYERS_DUCT, PRISM_TOTAL_DUCT,
-               PRISM_MIN_THICKNESS],
+        prism=[PRISM_LAYERS, PRISM_LAYERS_DUCT, PRISM_EXPANSION, PRISM_FINAL_REL, PRISM_MIN_REL],
         location_in_mesh=LOCATION_IN_MESH,
     )
     return json.loads(json.dumps(s))     # tuples -> lists, comparable with the stored copy
@@ -422,10 +425,9 @@ def prepare_mesh(mesh_dir, s, half):
                f"enginePortsLevel    {lv('engine_ports')};\n"
                f"nLayers             {PRISM_LAYERS};\n"
                f"nLayersDuct         {PRISM_LAYERS_DUCT};\n"
-               f"firstLayerThickness {PRISM_FIRST_CELL:.6g};\n"
-               f"layerThickness      {PRISM_TOTAL:.6g};\n"
-               f"layerThicknessDuct  {PRISM_TOTAL_DUCT:.6g};\n"
-               f"minLayerThickness   {PRISM_MIN_THICKNESS:.6g};\n"
+               f"expansionRatio      {PRISM_EXPANSION:.6g};\n"
+               f"finalLayerThickness {PRISM_FINAL_REL:.6g};\n"
+               f"minLayerThickness   {PRISM_MIN_REL:.6g};\n"
                f"locationInMesh      {fmt_vec(LOCATION_IN_MESH)};\n")
     write_text(path("system", "include", "refinementBoxes"),
                "// Written by supersonic_detail_run.py\n" + "".join(
@@ -495,7 +497,7 @@ def mesh_stats(c):
                 out[f"mesh_{key}"] = int(m.group(1))
         m = re.search(r"Mesh non-orthogonality Max:\s+(\S+)", text)
         out["max_non_orthogonality"] = float(m.group(1)) if m else None
-        m = re.search(r"Max skewness = (\S+)", text)
+        m = re.search(r"Max skewness = ([-+0-9.eE]+)", text)
         out["max_skewness"] = float(m.group(1)) if m else None
         out["checkMesh_ok"] = "Mesh OK." in text
     except OSError:
