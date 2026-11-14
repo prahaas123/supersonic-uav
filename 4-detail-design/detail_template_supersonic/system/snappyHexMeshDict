@@ -118,6 +118,7 @@ addLayersControls
             thicknessModel      firstAndOverall;
             firstLayerThickness $firstLayerThickness;
             thickness           $layerThicknessDuct;
+            minThickness        $minLayerThickness;  // required per patch once a thickness model is given
         }
     }
 
