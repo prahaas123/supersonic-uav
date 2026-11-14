@@ -92,11 +92,15 @@ REFINEMENT_BOXES = {
 # the earlier absolute 10 mm / 5 mm stacks on 0.4-3 mm cells kept only ~28% of the wall faces.
 # Final layer 0.3 cell, growth 1.2 -> first cell ~0.45 mm on the 3.125 mm airframe cells (y+ ~100),
 # ~0.23 mm on 1.56 mm cells, ~0.07 mm on the 0.39 mm lip; nutUSpaldingWallFunction covers that range.
+# rhoCentralFoam is explicit with an acoustic Courant limit, so the thinnest cell anywhere sets the
+# time step. The 0.39 mm lip cells get no layers (medial-axis thinning at the lip edge squeezed its
+# stack to ~0.02 mm and deltaT to 4e-8 s), and stacks squeezed below half their target are removed.
 PRISM_LAYERS         = 5
 PRISM_LAYERS_DUCT    = 4
+PRISM_LAYERS_LIP     = 0
 PRISM_EXPANSION      = 1.2
 PRISM_FINAL_REL      = 0.3       # outermost layer / local surface cell size
-PRISM_MIN_REL        = 0.1       # snappyHexMesh removes stacks thinner than this x local cell size
+PRISM_MIN_REL        = 0.5       # snappyHexMesh removes stacks thinner than this x local cell size
 
 LOCATION_IN_MESH = (-4.0123, 2.0123, 2.0123)   # any point in the fluid with y > 0
 
@@ -106,7 +110,7 @@ LOCATION_IN_MESH = (-4.0123, 2.0123, 2.0123)   # any point in the fluid with y >
 CASE_TEMPLATE    = os.path.join(HERE, "detail_template_supersonic")
 NP               = 50            # MPI processes
 END_TIME         = 0.02          # [s] cap, ~12 flow-throughs of the 1.67 m body
-WRITE_INTERVAL   = END_TIME / 10 # [s] periodic writes so a timed-out job can be resumed
+WRITE_INTERVAL   = END_TIME / 40 # [s] periodic writes so a timed-out job can be resumed (purgeWrite 2)
 MAX_COURANT      = 0.5
 MONITOR_INTERVAL = 10            # time steps between monitor samples
 RESUME           = False         # continue a case whose processor* directories survived a timed-out job
@@ -362,7 +366,8 @@ def mesh_settings(half):
         base_size=BASE_SIZE, surface_sizes=SURFACE_SIZES, feature_edge_size=FEATURE_EDGE_SIZE,
         n_cells_between_levels=N_CELLS_BETWEEN_LEVELS, resolve_feature_angle=RESOLVE_FEATURE_ANGLE,
         refinement_boxes=REFINEMENT_BOXES,
-        prism=[PRISM_LAYERS, PRISM_LAYERS_DUCT, PRISM_EXPANSION, PRISM_FINAL_REL, PRISM_MIN_REL],
+        prism=[PRISM_LAYERS, PRISM_LAYERS_DUCT, PRISM_LAYERS_LIP, PRISM_EXPANSION, PRISM_FINAL_REL,
+               PRISM_MIN_REL],
         location_in_mesh=LOCATION_IN_MESH,
     )
     return json.loads(json.dumps(s))     # tuples -> lists, comparable with the stored copy
@@ -425,6 +430,7 @@ def prepare_mesh(mesh_dir, s, half):
                f"enginePortsLevel    {lv('engine_ports')};\n"
                f"nLayers             {PRISM_LAYERS};\n"
                f"nLayersDuct         {PRISM_LAYERS_DUCT};\n"
+               f"nLayersLip          {PRISM_LAYERS_LIP};\n"
                f"expansionRatio      {PRISM_EXPANSION:.6g};\n"
                f"finalLayerThickness {PRISM_FINAL_REL:.6g};\n"
                f"minLayerThickness   {PRISM_MIN_REL:.6g};\n"

@@ -102,8 +102,8 @@ snapControls
 }
 
 // Prism layers: final layer thickness and growth ratio relative to the local surface cell size, so
-// the stack stays ~1 cell thick on every refinement level; the inlet lip and duct walls get fewer
-// layers; the engine face and exhaust get none
+// the stack stays ~1 cell thick on every refinement level; the duct walls get fewer layers; the
+// inlet lip, engine face and exhaust get none (thinned lip layers set the explicit time step)
 addLayersControls
 {
     relativeSizes true;
@@ -113,9 +113,13 @@ addLayersControls
         {
             nSurfaceLayers      $nLayers;
         }
-        "(inlet_lip|inlet_duct)"
+        inlet_duct
         {
             nSurfaceLayers      $nLayersDuct;
+        }
+        inlet_lip
+        {
+            nSurfaceLayers      $nLayersLip;
         }
     }
 
