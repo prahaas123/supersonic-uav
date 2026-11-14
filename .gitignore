@@ -5,3 +5,4 @@ archive
 *.vsp3
 *pycache*
 5-paper/
+*.stl
