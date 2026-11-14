@@ -1,0 +1,4 @@
+// Written by supersonic_detail_run.py: fixed static pressure for a supersonic exhaust,
+// zeroGradient when the 1D exit Mach number is subsonic
+type            fixedValue;
+value           uniform 15065;

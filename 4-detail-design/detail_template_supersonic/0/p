@@ -14,32 +14,34 @@ FoamFile
 }
 // ============================================================================
 
-#include        "include/freeStreamVars"
+#include        "include/flowVars"
 dimensions      [1 -1 -2 0 0 0 0];
-internalField   uniform $pInf;
+internalField   uniform $pInf;      // absolute pressure
 
 boundaryField
 {
-    inlet
-    {
-        type            fixedValue;
-        value           uniform $pInf;
-    }
-    outlet
-    {
-        type            zeroGradient;
-    }
+    // Supersonic free stream: fixed at inflow faces, extrapolated at outflow faces
     farfield
     {
         type            freestreamPressure;
         freestreamValue uniform $pInf;
+        supersonic      true;
+        value           uniform $pInf;
     }
     symmetry
     {
         type            symmetry;
     }
-    uav
+    "(airframe|inlet_lip|inlet_duct)"
     {
         type            zeroGradient;
+    }
+    engine_face
+    {
+        type            zeroGradient;
+    }
+    exhaust
+    {
+        #include        "include/exhaustPressure"
     }
 }

@@ -1,0 +1,25 @@
+// Written by supersonic_detail_run.py for every case (values below: Mach 1.5, alpha 0, beta 0, 15 km)
+
+// Freestream
+Uinf            (442.581 0 0);
+pInf            12044.6;
+Tinf            216.65;
+rhoInf          0.193688;
+kinf            29.3818;
+omegaInf        40160.6;
+nutInf          0.000731586;
+Prt             0.9;
+
+// Engine face (pressure-free outlet at the target air mass flow)
+mdotEngineFace  0.13175;
+T0inf           314.143;
+
+// Exhaust (supersonic mass-flow inlet)
+mdotExhaust     0.14255;
+T0Exhaust       2250;
+gammaExhaust    1.4;
+UExhaust        (1123.4 0 0);
+TExhaust        1623.0;
+rhoExhaust      0.0323;
+kExhaust        189.3;
+omegaExhaust    11100;

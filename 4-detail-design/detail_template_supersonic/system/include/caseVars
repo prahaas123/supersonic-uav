@@ -1,0 +1,7 @@
+// Written by supersonic_detail_run.py (example values)
+tEnd            0.02;
+tWrite          0.002;
+maxCourant      0.5;
+monitorInterval 10;
+cg              (0.826 0 0);
+rhoInfRef       0.193688;

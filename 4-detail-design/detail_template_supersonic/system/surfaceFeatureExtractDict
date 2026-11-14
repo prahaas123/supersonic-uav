@@ -14,6 +14,8 @@ FoamFile
 }
 // ============================================================================
 
+// Sharp edges (> 30 deg between faces, as in the STAR-CCM+ import) and the edges between the named
+// regions (lip / duct / engine face / exhaust boundaries)
 uav.stl
 {
     extractionMethod    extractFromSurface;
@@ -21,6 +23,12 @@ uav.stl
     extractFromSurfaceCoeffs
     {
         includedAngle   150;
+    }
+
+    subsetFeatures
+    {
+        nonManifoldEdges    yes;
+        openEdges           yes;
     }
 
     writeObj            yes;

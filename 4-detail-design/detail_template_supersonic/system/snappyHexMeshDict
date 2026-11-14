@@ -14,6 +14,11 @@ FoamFile
 }
 // ============================================================================
 
+// Refinement levels, layer sizes and the outside point, written by supersonic_detail_run.py.
+// Level n = BASE_SIZE / 2^n (0.4 m base: 3 = 50 mm, 4 = 25, 5 = 12.5, 6 = 6.25, 7 = 3.125,
+// 8 = 1.5625, 9 = 0.78125, 10 = 0.390625 mm)
+#include "include/meshVars"
+
 castellatedMesh true;
 snap            true;
 addLayers       true;
@@ -22,64 +27,65 @@ mergeTolerance 1e-6;
 
 geometry
 {
+    // One STL solid per named CAD face -> one patch each
     uav.stl
     {
         type triSurfaceMesh;
         name uav;
+        regions
+        {
+            airframe    { name airframe; }
+            inlet_lip   { name inlet_lip; }
+            inlet_duct  { name inlet_duct; }
+            engine_face { name engine_face; }
+            exhaust     { name exhaust; }
+        }
     }
 
-    shockAndWakeBox
-    {
-        type searchableBox;
-        min (-0.5  0.0 -1.2);
-        max ( 4.2  1.6  1.2);
-    }
+    // Refinement boxes (searchableBox entries)
+    #include "include/refinementBoxes"
 }
 
 castellatedMeshControls
 {
-    maxLocalCells 1000000;
-    maxGlobalCells 20000000;
-    minRefinementCells 10;
-    maxLoadUnbalance 0.10;
-    nCellsBetweenLevels 5;
+    maxLocalCells       2000000;
+    maxGlobalCells      150000000;
+    minRefinementCells  10;
+    maxLoadUnbalance    0.10;
+    nCellsBetweenLevels $nCellsBetweenLevels;
 
     features
     (
         {
             file "uav.eMesh";
-            level 8;
+            level $featureLevel;
         }
     );
 
     refinementSurfaces
-{
-    uav
     {
-        level (7 8);
-        regions
+        uav
         {
-            uav
+            level $airframeLevel;
+            regions
             {
-                level (7 8);
-                name uav_wall;
+                airframe    { level $airframeLevel;    patchInfo { type wall; } }
+                inlet_lip   { level $inletLipLevel;    patchInfo { type wall; } }
+                inlet_duct  { level $inletDuctLevel;   patchInfo { type wall; } }
+                engine_face { level $enginePortsLevel; patchInfo { type patch; } }
+                exhaust     { level $enginePortsLevel; patchInfo { type patch; } }
             }
         }
     }
-}
 
-    resolveFeatureAngle 30;
+    resolveFeatureAngle $resolveFeatureAngle;
 
     refinementRegions
     {
-        shockAndWakeBox
-        {
-            mode inside;
-            levels ((1.0 4));
-        }
+        #include "include/refinementRegions"
     }
 
-    locationInMesh (-2.114 1.275 0.833); 
+    locationInMesh $locationInMesh;
     allowFreeStandingZoneFaces true;
 }
 
@@ -87,29 +93,38 @@ snapControls
 {
     nSmoothPatch 3;
     tolerance 2.0;
-    nSolveIter 15;
+    nSolveIter 30;
     nRelaxIter 5;
-    nFeatureSnapIter 5;
+    nFeatureSnapIter 10;
     implicitFeatureSnap false;
     explicitFeatureSnap true;
-    multiRegionFeatureSnap false;
+    multiRegionFeatureSnap true;
 }
 
+// Prism layers: first cell height and total thickness (absolute), the inlet lip and duct walls get
+// fewer, thinner layers; the engine face and exhaust get none
 addLayersControls
 {
     relativeSizes false;
     layers
     {
-        uav
+        airframe
         {
-            nSurfaceLayers 8;
+            nSurfaceLayers      $nLayers;
+        }
+        "(inlet_lip|inlet_duct)"
+        {
+            nSurfaceLayers      $nLayersDuct;
+            thicknessModel      firstAndOverall;
+            firstLayerThickness $firstLayerThickness;
+            thickness           $layerThicknessDuct;
         }
     }
 
-    thicknessModel firstAndExpansion;
-    firstLayerThickness 1.31e-04;
-    expansionRatio 1.2;
-    minThickness 1.31e-04;
+    thicknessModel firstAndOverall;
+    firstLayerThickness $firstLayerThickness;
+    thickness $layerThickness;
+    minThickness $minLayerThickness;
     nGrow 0;
     featureAngle 130;
     slipFeatureAngle 30;
@@ -126,7 +141,7 @@ addLayersControls
 
 meshQualityControls
 {
-    maxNonOrtho 60;
+    maxNonOrtho 65;
     maxBoundarySkewness 20;
     maxInternalSkewness 4;
     maxConcave 80;
@@ -142,6 +157,11 @@ meshQualityControls
     nSmoothScale 4;
     errorReduction 0.75;
     minTriangleTwist -1;
+
+    relaxed
+    {
+        maxNonOrtho 75;
+    }
 }
 
 debug 0;

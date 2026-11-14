@@ -14,21 +14,12 @@ FoamFile
 }
 // ============================================================================
 
-#include        "include/freeStreamVars"
+#include        "include/flowVars"
 dimensions      [0 2 -2 0 0 0 0];
 internalField   uniform $kinf;
 
 boundaryField
 {
-    inlet
-    {
-        type            fixedValue;
-        value           uniform $kinf;
-    }
-    outlet
-    {
-        type            zeroGradient;
-    }
     farfield
     {
         type            freestream;
@@ -38,9 +29,20 @@ boundaryField
     {
         type            symmetry;
     }
-    uav
+    "(airframe|inlet_lip|inlet_duct)"
     {
         type            kqRWallFunction;
         value           uniform $kinf;
+    }
+    engine_face
+    {
+        type            inletOutlet;
+        inletValue      uniform $kinf;
+        value           uniform $kinf;
+    }
+    exhaust
+    {
+        type            fixedValue;
+        value           uniform $kExhaust;
     }
 }

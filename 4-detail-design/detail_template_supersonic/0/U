@@ -14,33 +14,43 @@ FoamFile
 }
 // ============================================================================
 
-#include        "include/freeStreamVars"
+#include        "include/flowVars"
 dimensions      [0 1 -1 0 0 0 0];
 internalField   uniform $Uinf;
 
 boundaryField
 {
-    inlet
-    {
-        type            freestreamVelocity;
-        freestreamValue uniform $Uinf;
-    }
-    outlet
-    {
-        type            freestreamVelocity;
-        freestreamValue uniform $Uinf;
-    }
+    // Free stream on every outer face (Mach, p, T and flow direction from alpha / beta)
     farfield
     {
         type            freestreamVelocity;
         freestreamValue uniform $Uinf;
+        value           uniform $Uinf;
     }
     symmetry
     {
         type            symmetry;
     }
-    uav
+    "(airframe|inlet_lip|inlet_duct)"
     {
         type            noSlip;
+    }
+    // Engine face: flow leaves the domain at the target air mass flow, static pressure is a result
+    engine_face
+    {
+        type            flowRateOutletVelocity;
+        massFlowRate    $mdotEngineFace;
+        rho             rho;
+        rhoOutlet       $rhoInf;
+        value           uniform $Uinf;
+    }
+    // RDE exhaust: mass-flow inlet normal to the base (air + fuel)
+    exhaust
+    {
+        type            flowRateInletVelocity;
+        massFlowRate    $mdotExhaust;
+        rho             rho;
+        rhoInlet        $rhoExhaust;
+        value           uniform $UExhaust;
     }
 }

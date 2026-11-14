@@ -14,21 +14,12 @@ FoamFile
 }
 // ============================================================================
 
-#include        "include/freeStreamVars"
+#include        "include/flowVars"
 dimensions      [0 0 -1 0 0 0 0];
 internalField   uniform $omegaInf;
 
 boundaryField
 {
-    inlet
-    {
-        type            fixedValue;
-        value           uniform $omegaInf;
-    }
-    outlet
-    {
-        type            zeroGradient;
-    }
     farfield
     {
         type            freestream;
@@ -38,9 +29,20 @@ boundaryField
     {
         type            symmetry;
     }
-    uav
+    "(airframe|inlet_lip|inlet_duct)"
     {
         type            omegaWallFunction;
         value           uniform $omegaInf;
+    }
+    engine_face
+    {
+        type            inletOutlet;
+        inletValue      uniform $omegaInf;
+        value           uniform $omegaInf;
+    }
+    exhaust
+    {
+        type            fixedValue;
+        value           uniform $omegaExhaust;
     }
 }

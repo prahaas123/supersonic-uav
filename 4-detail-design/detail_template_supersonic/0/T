@@ -14,21 +14,12 @@ FoamFile
 }
 // ============================================================================
 
-#include        "include/freeStreamVars"
+#include        "include/flowVars"
 dimensions      [0 0 0 1 0 0 0];
 internalField   uniform $Tinf;
 
 boundaryField
 {
-    inlet
-    {
-        type            fixedValue;
-        value           uniform $Tinf;
-    }
-    outlet
-    {
-        type            zeroGradient;
-    }
     farfield
     {
         type            freestream;
@@ -38,8 +29,22 @@ boundaryField
     {
         type            symmetry;
     }
-    uav
+    "(airframe|inlet_lip|inlet_duct)"
     {
         #include        "include/wallThermal"
+    }
+    // Backflow (if any) enters at the freestream total temperature
+    engine_face
+    {
+        type            inletOutlet;
+        inletValue      uniform $T0inf;
+        value           uniform $Tinf;
+    }
+    exhaust
+    {
+        type            totalTemperature;
+        T0              uniform $T0Exhaust;
+        gamma           $gammaExhaust;
+        value           uniform $TExhaust;
     }
 }

@@ -14,22 +14,13 @@ FoamFile
 }
 // ============================================================================
 
+#include        "include/flowVars"
 dimensions      [1 -1 -1 0 0 0 0];
 internalField   uniform 0;
 
 boundaryField
 {
-    inlet
-    {
-        type            calculated;
-        value           uniform 0;
-    }
-    outlet
-    {
-        type            calculated;
-        value           uniform 0;
-    }
-    farfield
+    "(farfield|engine_face|exhaust)"
     {
         type            calculated;
         value           uniform 0;
@@ -38,10 +29,10 @@ boundaryField
     {
         type            symmetry;
     }
-    uav
+    "(airframe|inlet_lip|inlet_duct)"
     {
         type            compressible::alphatWallFunction;
-        Prt             0.85;
+        Prt             $Prt;
         value           uniform 0;
     }
 }

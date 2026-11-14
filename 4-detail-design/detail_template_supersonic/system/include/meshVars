@@ -1,0 +1,15 @@
+// Written by supersonic_detail_run.py (example values)
+nCellsBetweenLevels 3;
+featureLevel        8;
+resolveFeatureAngle 30;
+airframeLevel       (7 8);
+inletLipLevel       (10 10);
+inletDuctLevel      (8 9);
+enginePortsLevel    (8 9);
+nLayers             8;
+nLayersDuct         6;
+firstLayerThickness 0.0006;
+layerThickness      0.01;
+layerThicknessDuct  0.005;
+minLayerThickness   0.0001;
+locationInMesh      (-4.0123 2.0123 2.0123);

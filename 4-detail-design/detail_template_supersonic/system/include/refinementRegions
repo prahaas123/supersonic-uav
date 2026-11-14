@@ -1,0 +1,7 @@
+// Written by supersonic_detail_run.py (example values)
+refineFar   { mode inside; levels ((1e15 3)); }
+refineMid   { mode inside; levels ((1e15 4)); }
+refineNear  { mode inside; levels ((1e15 5)); }
+refineBody  { mode inside; levels ((1e15 6)); }
+refineInlet { mode inside; levels ((1e15 7)); }
+refinePlume { mode inside; levels ((1e15 6)); }

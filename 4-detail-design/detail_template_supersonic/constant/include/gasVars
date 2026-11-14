@@ -1,0 +1,5 @@
+// Written by supersonic_detail_run.py: calorically perfect air (constant cp) with Sutherland viscosity
+gasMolWeight    28.9649;     // R = 8314.46 / molWeight = 287.05 J/kg/K
+gasCp           1004.68;     // gamma R / (gamma - 1), gamma = 1.4
+sutherlandAs    1.458e-06;
+sutherlandTs    110.4;
