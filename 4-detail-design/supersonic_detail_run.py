@@ -651,7 +651,7 @@ def read_columns(case, fo, fname, min_cols=2):
     if t is None:
         return None, None, []
     names = []
-    for path in sorted(glob.glob(os.path.join(case, "postProcessing", fo, "*", fname))):
+    for path in metrics.dat_files(case, fo, fname):
         with open(path) as fh:
             for line in fh:
                 if line.startswith("# Time"):
@@ -831,8 +831,7 @@ def reports(case, flow, hist):
 
     # Wall y+ at the write times (yPlus function object, per patch)
     yp = {}
-    for path in sorted(glob.glob(os.path.join(case, "postProcessing", "yPlus", "*", "yPlus.dat")),
-                       key=metrics._start_time):
+    for path in metrics.dat_files(case, "yPlus", "yPlus.dat"):
         for line in open(path):
             p = line.split()
             if line.startswith("#") or len(p) < 5:
@@ -928,14 +927,14 @@ def plot_residuals(case):
     except ImportError:
         return
     res = {}
-    for path in sorted(glob.glob(os.path.join(case, "postProcessing", "residuals", "*", "solverInfo.dat")),
-                       key=metrics._start_time):
+    for path in metrics.dat_files(case, "residuals", "solverInfo.dat"):
         lines = open(path).readlines()
         header = next((l for l in lines if l.startswith("# Time")), None)
         if header is None:
             continue
         cols = header.lstrip("#").split()
         fields = {c[:-len("_initial")]: i for i, c in enumerate(cols) if c.endswith("_initial")}
+        fresh = set(fields)   # series not yet trimmed for this file
         for line in lines:
             p = line.split()
             if line.startswith("#") or len(p) != len(cols):
@@ -943,10 +942,17 @@ def plot_residuals(case):
             for name, i in fields.items():
                 tt, vv = res.setdefault(name, ([], []))
                 try:
-                    if not tt or float(p[0]) > tt[-1]:
-                        tt.append(float(p[0])); vv.append(float(p[i]))
+                    t, v = float(p[0]), float(p[i])
                 except ValueError:
-                    pass
+                    continue
+                if name in fresh:
+                    # A restart supersedes everything from its first time onward
+                    while tt and tt[-1] >= t:
+                        tt.pop(); vv.pop()
+                    fresh.discard(name)
+                elif tt and t <= tt[-1]:
+                    continue
+                tt.append(t); vv.append(v)
     if not res:
         return
     fig, ax = plt.subplots(figsize=(9, 5))

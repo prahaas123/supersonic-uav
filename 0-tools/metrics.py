@@ -17,15 +17,23 @@ def _start_time(path):
     except ValueError:
         return 0.0
 
+def dat_files(case_dir, function_object, filename):
+    # OpenFOAM writes <stem>_<startTime>.dat when restarting into a time folder that
+    # already holds <stem>.dat, so match both, ordered by start folder then write order
+    stem, ext = os.path.splitext(filename)
+    base = os.path.join(case_dir, "postProcessing", function_object, "*")
+    files = set(glob.glob(os.path.join(base, filename))) | \
+            set(glob.glob(os.path.join(base, f"{stem}_*{ext}")))
+    return sorted(files, key=lambda p: (_start_time(p), os.path.getmtime(p)))
+
 def _read_dat(case_dir, function_object, filename, min_cols):
-    pattern = os.path.join(case_dir, "postProcessing", function_object,
-                           "*", filename)
-    files = sorted(glob.glob(pattern), key=_start_time)
+    files = dat_files(case_dir, function_object, filename)
     if not files:
         return None, None
 
     times, rows = [], []
     for path in files:
+        first = True
         with open(path, "r") as fh:
             for line in fh:
                 if line.startswith("#"):
@@ -38,8 +46,13 @@ def _read_dat(case_dir, function_object, filename, min_cols):
                     vals = [float(v) for v in parts[1:]]
                 except ValueError:
                     continue
-                # Restarts re-emit the overlap, keep the first occurrence
-                if times and t <= times[-1]:
+                if first:
+                    # A restart supersedes everything from its first time onward
+                    while times and times[-1] >= t:
+                        times.pop()
+                        rows.pop()
+                    first = False
+                elif times and t <= times[-1]:
                     continue
                 times.append(t)
                 rows.append(vals)
