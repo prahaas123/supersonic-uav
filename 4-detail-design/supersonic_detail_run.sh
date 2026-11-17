@@ -6,7 +6,7 @@
 #SBATCH --nodes=1
 #SBATCH --ntasks-per-node=50
 #SBATCH --cpus-per-task=1
-#SBATCH --mem=150G
+#SBATCH --mem=50G
 #SBATCH --output=supersonic_detail_run.log
 #SBATCH --open-mode=append
 
