@@ -102,8 +102,8 @@ snapControls
 }
 
 // Prism layers: final layer thickness and growth ratio relative to the local surface cell size, so
-// the stack stays ~1 cell thick on every refinement level; the duct walls get fewer layers; the
-// inlet lip, engine face and exhaust get none (thinned lip layers set the explicit time step)
+// the stack stays ~1 cell thick on every refinement level. Layer counts come from the run script
+// (currently airframe only); thin layers at the lip and duct entrance set the explicit time step
 addLayersControls
 {
     relativeSizes true;
@@ -145,7 +145,7 @@ addLayersControls
 meshQualityControls
 {
     maxNonOrtho 65;
-    maxBoundarySkewness 20;
+    maxBoundarySkewness 6;
     maxInternalSkewness 4;
     maxConcave 80;
     minFlatness 0.5;

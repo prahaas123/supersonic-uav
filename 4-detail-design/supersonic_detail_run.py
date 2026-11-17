@@ -86,17 +86,8 @@ REFINEMENT_BOXES = {
     "refinePlume": (( 1.38, -0.15,  -0.15),  (2.60, 0.15,  0.15), 0.00625),   # STAR: x 1.80, +/-0.12
 }
 
-# prism layers: airframe, then inlet lip + duct walls (engine face and exhaust get none)
-# Sized relative to the local surface cell (relativeSizes) so the stack is ~1 cell thick everywhere.
-# snappyHexMesh cannot push a stack much thicker than the surface cells into the castellated mesh:
-# the earlier absolute 10 mm / 5 mm stacks on 0.4-3 mm cells kept only ~28% of the wall faces.
-# Final layer 0.3 cell, growth 1.2 -> first cell ~0.45 mm on the 3.125 mm airframe cells (y+ ~100),
-# ~0.23 mm on 1.56 mm cells, ~0.07 mm on the 0.39 mm lip; nutUSpaldingWallFunction covers that range.
-# rhoCentralFoam is explicit with an acoustic Courant limit, so the thinnest cell anywhere sets the
-# time step. The 0.39 mm lip cells get no layers (medial-axis thinning at the lip edge squeezed its
-# stack to ~0.02 mm and deltaT to 4e-8 s), and stacks squeezed below half their target are removed.
 PRISM_LAYERS         = 5
-PRISM_LAYERS_DUCT    = 4
+PRISM_LAYERS_DUCT    = 0
 PRISM_LAYERS_LIP     = 0
 PRISM_EXPANSION      = 1.2
 PRISM_FINAL_REL      = 0.3       # outermost layer / local surface cell size
@@ -111,7 +102,7 @@ CASE_TEMPLATE    = os.path.join(HERE, "detail_template_supersonic")
 NP               = 50            # MPI processes
 END_TIME         = 0.02          # [s] cap, ~12 flow-throughs of the 1.67 m body
 WRITE_INTERVAL   = END_TIME / 40 # [s] periodic writes so a timed-out job can be resumed (purgeWrite 2)
-MAX_COURANT      = 0.5
+MAX_COURANT      = 0.3
 MONITOR_INTERVAL = 10            # time steps between monitor samples
 RESUME           = False         # continue a case whose processor* directories survived a timed-out job
 POLL_S           = 120           # [s] between stopping-criterion checks while the solver runs
