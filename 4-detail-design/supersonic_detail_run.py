@@ -106,6 +106,10 @@ MAX_COURANT      = 0.3
 MONITOR_INTERVAL = 10            # time steps between monitor samples
 RESUME           = False         # continue a case whose processor* directories survived a timed-out job
 POLL_S           = 120           # [s] between stopping-criterion checks while the solver runs
+# Initial field: "auto" = the finished case on the same mesh closest in (Mach, alpha, beta), converged
+# cases first; a case path = that case; None = uniform freestream. The internal fields of its latest
+# time are copied into 0/ (same mesh, so cell for cell); boundary conditions stay those of this case.
+INIT_FROM        = "auto"
 
 # Stopping: all of these must stay within the given band (max - min) over the final window
 ASYMPTOTE = {
@@ -116,6 +120,7 @@ ASYMPTOTE = {
 }
 ASYMPTOTE_WINDOW_S   = 2.0e-3    # [s] ~0.5 body flow-throughs
 ASYMPTOTE_MIN_TIME_S = 6.0e-3    # [s] no check before this time
+ASYMPTOTE_MIN_TIME_INIT_S = 4.0e-3   # [s] the same, for a case started from another case (INIT_FROM)
 
 WALL_PATCHES = ("airframe", "inlet_lip", "inlet_duct")
 
@@ -159,8 +164,11 @@ def main():
         print("[1/4] Copying the mesh and writing the flow condition ...")
         prepare_case(case, mesh_dir)
     write_flow_settings(case, flow)
-    write_json(case, {**read_json(case), "case": os.path.abspath(case), "flow": flow,
-                      "mesh": read_json(mesh_dir)})
+    meta = {**read_json(case), "case": os.path.abspath(case), "flow": flow, "mesh": read_json(mesh_dir)}
+    if not resume:
+        src = find_init_source(case, mesh_dir, flow)
+        meta["init_from"] = initialise_from(case, *src) if src else None
+    write_json(case, meta)
 
     # 3. Solve
     print("[2/4] Solving (rhoCentralFoam) ...")
@@ -513,6 +521,109 @@ def prepare_case(case, mesh_dir):
     open(os.path.join(case, os.path.basename(os.path.normpath(case)) + ".foam"), "w").close()
 
 
+def mesh_signature(c):
+    # "nPoints:.. nCells:.. nFaces:.. nInternalFaces:.." from the owner file header (ASCII in binary files too)
+    try:
+        with open(os.path.join(c, "constant", "polyMesh", "owner"), "rb") as fh:
+            head = fh.read(4096).decode("ascii", "replace")
+    except OSError:
+        return None
+    m = re.search(r'note\s+"([^"]*)"', head)
+    return " ".join(m.group(1).split()) if m else None
+
+
+def find_init_source(case, mesh_dir, flow):
+    """(case, time) of the solution to start from, or None (see INIT_FROM)."""
+    if not INIT_FROM:
+        return None
+    settings, sig = read_json(mesh_dir).get("mesh_settings"), mesh_signature(mesh_dir)
+    explicit = INIT_FROM != "auto"
+    paths = [INIT_FROM] if explicit else sorted(glob.glob(os.path.join(".", "detail_M*_a*_b*")))
+    found = []
+    for src in paths:
+        reason = None
+        if os.path.abspath(src) == os.path.abspath(case):
+            reason = "it is this case"
+        elif not os.path.isdir(src):
+            reason = "not found"
+        elif read_json(src).get("mesh", {}).get("mesh_settings") != settings or mesh_signature(src) != sig:
+            reason = "different mesh"
+        elif latest_time(src) is None:
+            reason = "no reconstructed solution"
+        if reason:
+            if explicit:
+                print(f"  INIT_FROM {src}: {reason}, starting from the freestream")
+            continue
+        m = read_json(src)
+        f = m.get("flow", {})
+        try:
+            d = (10.0 * abs(f["mach"] - flow["mach"]) + abs(f["alpha_deg"] - flow["alpha_deg"])
+                 + abs(f["beta_deg"] - flow["beta_deg"]))
+        except (KeyError, TypeError):
+            d = math.inf
+        found.append((not m.get("converged"), d, src))
+    if not found:
+        if not explicit:
+            print("  no finished case on the same mesh, starting from the freestream")
+        return None
+    src = min(found)[2]
+    return src, latest_time(src)
+
+
+def initialise_from(case, src, t):
+    """Copy the internal fields of src/t into case/0, keeping case/0's boundary conditions.
+    Returns a description for metrics.json, or None (fields left at the freestream) on failure."""
+    print(f"  initial field from {src} (t = {t} s)")
+    fields = [f for f in sorted(os.listdir(os.path.join(case, "0")))
+              if os.path.isfile(os.path.join(case, "0", f)) and os.path.isfile(os.path.join(src, t, f))]
+    tmp = os.path.join(case, t)
+    os.makedirs(tmp, exist_ok=True)
+    for f in fields:
+        shutil.copy(os.path.join(src, t, f), tmp)
+    # foamFormatConvert rewrites the copied fields in ASCII so their internalField can be spliced as text
+    cdict = os.path.join(case, "system", "controlDict")
+    with open(cdict) as fh:
+        fmt = re.search(r"^writeFormat\s+(\w+);", fh.read(), flags=re.M).group(1)
+    sub(cdict, r"^writeFormat\s+\w+;", "writeFormat     ascii;")
+    new = {}
+    try:
+        if run_steps(case, [("foamFormatConvert", f"foamFormatConvert -noConstant -time {t} -case {case}")]):
+            for f in fields:          # all fields spliced in memory first, so a failure leaves 0/ untouched
+                new[f] = splice_internal_field(os.path.join(case, "0", f), os.path.join(tmp, f))
+    except (OSError, ValueError) as e:
+        print(f"  could not copy the fields ({e})")
+        new = {}
+    finally:
+        sub(cdict, r"^writeFormat\s+\w+;", f"writeFormat     {fmt};")
+        shutil.rmtree(tmp, ignore_errors=True)
+    if not new:
+        print("  starting from the freestream instead")
+        return None
+    for f, text in new.items():
+        with open(os.path.join(case, "0", f), "w") as fh:
+            fh.write(text)
+    print(f"  copied {', '.join(new)}")
+    return f"{os.path.abspath(src)} (t = {t} s)"
+
+
+def splice_internal_field(target, source):
+    """target's text with its internalField entry replaced by source's (ASCII)."""
+    with open(source) as fh:
+        src = fh.read()
+    if not re.search(r"^\s*format\s+ascii;", src[:2000], flags=re.M):
+        raise ValueError(f"{source} is not ASCII")
+    i = src.find("\ninternalField")
+    j = src.find("\nboundaryField", i)
+    if i < 0 or j < 0:
+        raise ValueError(f"no internalField in {source}")
+    internal = src[i + 1:j].rstrip()
+    with open(target) as fh:
+        text, n = re.subn(r"^internalField\b[^;]*;", lambda _: internal, fh.read(), count=1, flags=re.M)
+    if n != 1:
+        raise ValueError(f"no internalField in {target}")
+    return text
+
+
 def write_flow_settings(case, f):
     path = lambda *p: os.path.join(case, *p)
     sym = f["symmetry_factor"]
@@ -574,6 +685,7 @@ def solve(case, flow, resume):
     proc = subprocess.Popen(f"mpirun -np {NP} rhoCentralFoam -parallel -case {case}", shell=True,
                             executable="/bin/bash", stdout=log, stderr=subprocess.STDOUT)
     reason = "end_time"
+    t_min = min_check_time(case)
     while True:
         try:
             proc.wait(timeout=POLL_S)
@@ -583,7 +695,7 @@ def solve(case, flow, resume):
         if reason != "end_time":
             continue
         try:
-            status = asymptote_status(histories(case, flow))
+            status = asymptote_status(histories(case, flow), t_min)
         except Exception as e:          # files mid-write, retry at the next poll
             print(f"  (monitor read failed: {e})")
             continue
@@ -618,7 +730,11 @@ def latest_time(case):
     return max(times, key=float) if times else None
 
 
-def asymptote_status(hist):
+def min_check_time(case):
+    return ASYMPTOTE_MIN_TIME_INIT_S if read_json(case).get("init_from") else ASYMPTOTE_MIN_TIME_S
+
+
+def asymptote_status(hist, t_min):
     out = {}
     for name, tol in ASYMPTOTE.items():
         if name not in hist:
@@ -628,7 +744,7 @@ def asymptote_status(hist):
             continue
         mask = t >= t[-1] - ASYMPTOTE_WINDOW_S
         width = float(np.ptp(y[mask]))
-        ok = t[-1] >= ASYMPTOTE_MIN_TIME_S and t[-1] - t[0] >= ASYMPTOTE_WINDOW_S and width <= tol
+        ok = t[-1] >= t_min and t[-1] - t[0] >= ASYMPTOTE_WINDOW_S and width <= tol
         out[name] = {"t": float(t[-1]), "width": width, "tol": tol, "ok": bool(ok)}
     return out
 
@@ -798,7 +914,7 @@ def reports(case, flow, hist):
     st = metrics.window_stats(*hist["CD"], metrics.TAIL_FRACTION)
     out["CD_drift_pct"] = st["drift_pct"] if st else None
 
-    status = asymptote_status(hist)
+    status = asymptote_status(hist, min_check_time(case))
     out["stopping_criteria"] = status
     out["converged"] = bool(status) and all(s["ok"] for s in status.values())
 
@@ -996,6 +1112,7 @@ def format_summary(m):
         f"  stopped by {m.get('stop_reason', '?')} at t = {m.get('t_end_s', float('nan')):.5g} s, "
         f"solve time {m.get('solve_time_s', float('nan')):.0f} s, "
         f"{m.get('mesh', {}).get('mesh_cells', '?')} cells",
+        f"  initial field: {m.get('init_from') or 'uniform freestream'}",
         "", "== Stopping criteria (band over the final window) ==",
     ]
     for k, s in m.get("stopping_criteria", {}).items():
