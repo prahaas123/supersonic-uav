@@ -104,9 +104,9 @@
 - Parametric S-duct model in Python ([build_inlet.py](3-inlet-design/build_inlet.py)), 5 design variables and an automatic geometry validity check.
 - CFD case template ([run_inlet.py](3-inlet-design/run_inlet.py)): OpenFOAM `rhoSimpleFoam`, RANS k-ω SST with wall functions. Validated using a baseline design
 - Design space exploration: 60 designs sampled by Latin hypercube over the 5 variables ([dse.py](3-inlet-design/dse.py)). No seperate optimizer becuase the design space is small enough.
-- Design 44 picked: 98.5% pressure recovery (best of the 60), uniform pressure distributation at the engine inlet, no seperation, and minimal wetted area (will be lighter structurally)
+- Design 39 picked: highest pressure recovery with a mass flow ratio of above 95% (will minimize drag from spillage at the inlet), minimal seperation, and small wetted area (will be lighter structurally)
 
-![Design 44 pressure side view](0-results/inlet_design_44/slice-pressure-side.png)
+![Design 44 pressure side view](0-results/inlet_design_39/slice-pressure-side.png)
 
 ## Next Steps
 
