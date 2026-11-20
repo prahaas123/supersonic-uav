@@ -42,22 +42,17 @@ F = M["flow"]
 G, R = F["gamma"], F["R"]
 HALF = F["half_model"]
 
-
-# ------------------------------------------------------------------------------------------ pipeline
 def reader(regions):
     r = OpenFOAMReader(FileName=foam)
     r.MeshRegions = regions
     r.UpdatePipelineInformation()
     return r
 
-
 def latest(r):
     times = r.TimestepValues
     return times[-1] if hasattr(times, "__len__") and len(times) else (times or 0.0)
 
-
 def derived(src):
-    # STAR-style derived fields as point data (the reader interpolates cell data to the points)
     src.UpdatePipeline(T_LATEST)
     names = set(src.PointData.keys())
     defs = [("Mach", f"mag(U)/sqrt({G}*{R}*T)"),
@@ -81,9 +76,7 @@ def derived(src):
     src.UpdatePipeline(T_LATEST)
     return src
 
-
 def mirror(src):
-    # Complete aircraft from a half model (sources that do not touch y = 0 only are left alone)
     if not HALF:
         return src
     r = Reflect(Input=src)
@@ -92,7 +85,6 @@ def mirror(src):
     r.CopyInput = 1
     r.UpdatePipeline(T_LATEST)
     return r
-
 
 def plane(src, origin, normal, triangulate=True):
     s = Slice(Input=src)
@@ -106,7 +98,6 @@ def plane(src, origin, normal, triangulate=True):
     s.UpdatePipeline(T_LATEST)
     return s
 
-
 def near_field(src, x):
     c = Clip(Input=src)
     c.ClipType = "Box"
@@ -116,8 +107,6 @@ def near_field(src, x):
     c.UpdatePipeline(T_LATEST)
     return c
 
-
-# ------------------------------------------------------------------------------------------ scenes
 def view(cam):
     rv = CreateView("RenderView")
     rv.ViewSize = IMAGE_SIZE
@@ -133,7 +122,6 @@ def view(cam):
     rv.CameraParallelScale = cam[3]
     return rv
 
-
 def solid(d, colour, edges=False):
     ColorBy(d, None)
     d.AmbientColor = colour
@@ -142,15 +130,13 @@ def solid(d, colour, edges=False):
         d.Representation = "Surface With Edges"
         d.EdgeColor = [0.1, 0.1, 0.12]
 
-
 def invert(lut):
     try:
         lut.InvertTransferFunction()
-    except AttributeError:                       # older ParaView: reverse the colours by hand
+    except AttributeError:
         p = list(lut.RGBPoints)
         cols = [p[i + 1:i + 4] for i in range(0, len(p), 4)][::-1]
         lut.RGBPoints = [v for x, c in zip(p[0::4], cols) for v in [x] + c]
-
 
 def colour(d, rv, array, lo, hi, cmap=None, title=None, log=False, inverted=False):
     ColorBy(d, ("POINTS", array))
@@ -179,18 +165,16 @@ def colour(d, rv, array, lo, hi, cmap=None, title=None, log=False, inverted=Fals
     bar.LabelFontSize = 18
     bar.RangeLabelFormat = "%-#.4g"
 
-
 def save(rv, name):
     t = Show(Text(Text=name), rv)
     t.WindowLocation = "Upper Left Corner"
     t.FontSize = 22
     t.Color = [0, 0, 0]
     Render(rv)
-    fname = "scene_" + "".join(c if c.isalnum() or c in "+-" else "_" for c in name) + ".png"
+    fname = "scene_" + "".join(c if c.isalnum() or c in "+-" else "_" for c in name.replace(" - ", " ")) + ".png"
     SaveScreenshot(os.path.join(images, fname), rv, ImageResolution=IMAGE_SIZE)
     Delete(rv)
     print("  wrote", fname, flush=True)
-
 
 def mesh_scene(name, parts, cam):
     rv = view(cam)
@@ -200,7 +184,6 @@ def mesh_scene(name, parts, cam):
     else:
         solid(Show(VEHICLE, rv), GREY, edges=True)
     save(rv, name)
-
 
 def scalar_scene(name, array, lo, hi, parts, cam, cmap=None, vehicle=False, title=None, log=False, inverted=False):
     rv = view(cam)
@@ -213,7 +196,6 @@ def scalar_scene(name, array, lo, hi, parts, cam, cmap=None, vehicle=False, titl
     if vehicle:
         solid(Show(VEHICLE, rv), GREY)
     save(rv, name)
-
 
 def lic_scene(name, cam):
     # Wall shear stress line integral convolution: surface streamlines, separation and attachment lines
@@ -229,8 +211,6 @@ def lic_scene(name, cam):
         colour(d, rv, "Cf", 0.0, 0.006, title="Cf")
     save(rv, name)
 
-
-# ------------------------------------------------------------------------------------------ checks
 def integrate(src):
     i = IntegrateVariables(Input=src)
     i.DivideCellDataByVolume = 0
@@ -239,7 +219,6 @@ def integrate(src):
     out = {cd.GetArrayName(k): cd.GetArray(k).GetValue(0) for k in range(cd.GetNumberOfArrays())}
     Delete(i)
     return out
-
 
 def checks():
     post = {"time": T_LATEST, "yplus": {}, "field_range": {}}
@@ -270,8 +249,6 @@ def checks():
         print("  low-pressure check failed:", e)
     return post
 
-
-# ------------------------------------------------------------------------------------------ main
 VOL_RAW = reader(["internalMesh"])
 T_LATEST = latest(VOL_RAW)
 VOL = derived(VOL_RAW)

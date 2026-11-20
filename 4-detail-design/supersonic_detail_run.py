@@ -54,7 +54,7 @@ WALL_TEMPERATURE = None          # None = adiabatic, a value [K] = isothermal wa
 # =====================================================================================================
 GEOMETRY   = os.path.join(HERE, "uav.stl")     # ASCII, one solid per named face, metres
 HALF_MODEL = None                # None: half model (symmetry plane y = 0) when BETA_DEG == 0, else full
-DOMAIN     = {"x": (-4.75, 7.5), "y": (-4.5, 4.5), "z": (-4.5, 4.5)}   # extended to whole BASE_SIZE cells
+DOMAIN     = {"x": (-2.4, 10.0), "y": (-4.5, 4.5), "z": (-3.6, 4.8)}   # extended to whole BASE_SIZE cells
 BASE_SIZE  = 0.4                 # background (largest) cell [m]; all sizes below are BASE_SIZE / 2^n
 
 # surface (target, minimum) cell size [m]
@@ -89,7 +89,7 @@ PRISM_EXPANSION      = 1.2
 PRISM_FINAL_REL      = 0.3       # outermost layer / local surface cell size
 PRISM_MIN_REL        = 0.5       # snappyHexMesh removes stacks thinner than this x local cell size
 
-LOCATION_IN_MESH = (-4.0123, 2.0123, 2.0123)   # any point in the fluid with y > 0
+LOCATION_IN_MESH = (-2.0123, 2.0123, 2.0123)   # any point in the fluid with y > 0
 
 # =====================================================================================================
 # RUN CONTROL
