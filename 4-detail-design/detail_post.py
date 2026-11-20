@@ -61,6 +61,7 @@ def derived(src):
     src.UpdatePipeline(T_LATEST)
     names = set(src.PointData.keys())
     defs = [("Mach", f"mag(U)/sqrt({G}*{R}*T)"),
+            ("VelocityRatio", f"mag(U)/{F['V_inf']}"),
             ("Cp", f"(p-{F['p_inf']})/{F['q_inf']}"),
             ("PressureRatio", f"p/{F['p_inf']}"),
             ("p0", f"p*(1+{0.5 * (G - 1)}*Mach^2)^{G / (G - 1)}"),
@@ -69,7 +70,7 @@ def derived(src):
         defs.append(("TurbulentViscosityRatio",
                      f"nut*rho*(T+{F['sutherland_Ts']})/({F['sutherland_As']}*T^1.5)"))
     if "grad(rho)" in names:
-        defs.append(("Schlieren", 'mag("grad(rho)")'))
+        defs.append(("Schlieren", 'mag("grad(rho)")+1e-12'))   # > 0 everywhere for the log colour scale
     if "wallShearStress" in names:
         defs.append(("Cf", f"mag(wallShearStress)/{F['q_inf']}"))
     for name, fn in defs:
@@ -142,12 +143,26 @@ def solid(d, colour, edges=False):
         d.EdgeColor = [0.1, 0.1, 0.12]
 
 
-def colour(d, rv, array, lo, hi, cmap=None, title=None):
+def invert(lut):
+    try:
+        lut.InvertTransferFunction()
+    except AttributeError:                       # older ParaView: reverse the colours by hand
+        p = list(lut.RGBPoints)
+        cols = [p[i + 1:i + 4] for i in range(0, len(p), 4)][::-1]
+        lut.RGBPoints = [v for x, c in zip(p[0::4], cols) for v in [x] + c]
+
+
+def colour(d, rv, array, lo, hi, cmap=None, title=None, log=False, inverted=False):
     ColorBy(d, ("POINTS", array))
     lut = GetColorTransferFunction(array)
     lut.ApplyPreset(cmap or COLORMAP, True)
+    if inverted:
+        invert(lut)
     lut.AutomaticRescaleRangeMode = "Never"
     lut.RescaleTransferFunction(lo, hi)
+    if log:                                      # lo must be > 0
+        lut.MapControlPointsToLogSpace()
+        lut.UseLogScale = 1
     lut.NumberOfTableValues = 64
     lut.Discretize = 1
     d.SetScalarBarVisibility(rv, True)
@@ -187,14 +202,14 @@ def mesh_scene(name, parts, cam):
     save(rv, name)
 
 
-def scalar_scene(name, array, lo, hi, parts, cam, cmap=None, vehicle=False, title=None):
+def scalar_scene(name, array, lo, hi, parts, cam, cmap=None, vehicle=False, title=None, log=False, inverted=False):
     rv = view(cam)
     for p in parts:
         if array not in p.PointData.keys():
             print(f"  skipped {name}: no {array}")
             Delete(rv)
             return
-        colour(Show(p, rv), rv, array, lo, hi, cmap, title)
+        colour(Show(p, rv), rv, array, lo, hi, cmap, title, log, inverted)
     if vehicle:
         solid(Show(VEHICLE, rv), GREY)
     save(rv, name)
@@ -288,24 +303,27 @@ mesh_scene("05 Mesh - base and plume", [pY0_mesh], TAIL)
 mesh_scene("06 Mesh - wing plane z=0.013", [pZ0_mesh], TOP)
 mesh_scene("07 Mesh - surface", [], ISO_TOP)
 
+# numerical Schlieren: |grad rho| on a log scale, white (uniform flow) to black (shocks, shear layers)
+SCHLIEREN = dict(cmap="Grayscale", inverted=True, log=True, title="|grad rho| [kg/m4]")
+
 # centreline
-scalar_scene("10 Mach - centreline", "Mach", 0.0, 2.0, [pY0], SIDE)
-scalar_scene("11 Mach - centreline (far)", "Mach", 0.0, 2.0, [pY0], SIDE_FAR)
-scalar_scene("12 Schlieren - centreline", "Schlieren", 0.0, 5.0, [pY0], SIDE, cmap="Grayscale")
-scalar_scene("13 Pressure ratio - centreline", "PressureRatio", 0.0, 3.5, [pY0], SIDE, title="p / p_inf")
+scalar_scene("10 Mach - centreline", "Mach", 0.0, 2.4, [pY0], SIDE)
+scalar_scene("11 Mach - centreline (far)", "Mach", 0.0, 2.4, [pY0], SIDE_FAR)
+scalar_scene("12 Schlieren - centreline", "Schlieren", 0.1, 100.0, [pY0], SIDE, **SCHLIEREN)
+scalar_scene("13 Pressure ratio - centreline", "PressureRatio", 0.4, 2.0, [pY0], SIDE, title="p / p_inf")
 scalar_scene("14 Temperature - centreline", "T", 200.0, 340.0, [pY0], SIDE, title="T [K]")
 scalar_scene("15 Total pressure recovery - centreline", "PressureRecovery", 0.3, 1.0, [pY0], SIDE,
              title="p0 / p0_inf")
-scalar_scene("16 Turbulent viscosity ratio - centreline", "TurbulentViscosityRatio", 0.0, 500.0, [pY0], SIDE,
-             title="mu_t / mu")
+scalar_scene("16 Turbulent viscosity ratio - centreline", "TurbulentViscosityRatio", 1.0, 3000.0, [pY0], SIDE,
+             title="mu_t / mu", log=True)
 
 # planform
-scalar_scene("20 Mach - wing plane z=0.013", "Mach", 0.0, 2.0, [pZ0], TOP)
-scalar_scene("21 Schlieren - wing plane z=0.013", "Schlieren", 0.0, 5.0, [pZ0], TOP, cmap="Grayscale")
-scalar_scene("22 Pressure ratio - wing plane z=0.013", "PressureRatio", 0.0, 3.5, [pZ0], TOP, title="p / p_inf")
+scalar_scene("20 Mach - wing plane z=0.013", "Mach", 0.0, 2.4, [pZ0], TOP)
+scalar_scene("21 Schlieren - wing plane z=0.013", "Schlieren", 0.1, 100.0, [pZ0], TOP, **SCHLIEREN)
+scalar_scene("22 Pressure ratio - wing plane z=0.013", "PressureRatio", 0.4, 2.0, [pZ0], TOP, title="p / p_inf")
 
 # cross-sections
-scalar_scene("30 Mach - x stations", "Mach", 0.0, 2.0, stations, ISO_STN, vehicle=True)
+scalar_scene("30 Mach - x stations", "Mach", 0.0, 2.4, stations, ISO_STN, vehicle=True)
 scalar_scene("31 Total pressure recovery - x stations", "PressureRecovery", 0.3, 1.0, stations, ISO_STN,
              vehicle=True, title="p0 / p0_inf")
 for i, x in enumerate(STATIONS):     # each station head-on, looking forward from behind
@@ -314,27 +332,27 @@ for i, x in enumerate(STATIONS):     # each station head-on, looking forward fro
                  [stations[i]], aft, title="p0 / p0_inf")
 
 # inlet and engine face
-scalar_scene("40 Inlet - Mach", "Mach", 0.0, 2.0, [pY0], INLET)
-scalar_scene("41 Inlet - total pressure recovery", "PressureRecovery", 0.5, 1.0, [pY0], INLET, title="p0 / p0_inf")
+scalar_scene("40 Inlet - Mach", "Mach", 0.0, 2.4, [pY0], INLET)
+scalar_scene("41 Inlet - total pressure recovery", "PressureRecovery", 0.3, 1.0, [pY0], INLET, title="p0 / p0_inf")
 scalar_scene("42 Inlet - pressure ratio", "PressureRatio", 0.0, 3.5, [pY0], INLET, title="p / p_inf")
-scalar_scene("43 Inlet - Schlieren", "Schlieren", 0.0, 20.0, [pY0], INLET, cmap="Grayscale")
-scalar_scene("44 Inlet - Mach at lip height (top view)", "Mach", 0.0, 2.0, [pZin], INLET_TOP)
-scalar_scene("45 Engine face - total pressure recovery", "PressureRecovery", 0.5, 1.0, [ENGINE], FRONT,
+scalar_scene("43 Inlet - Schlieren", "Schlieren", 0.5, 500.0, [pY0], INLET, **SCHLIEREN)
+scalar_scene("44 Inlet - Mach at lip height (top view)", "Mach", 0.0, 2.4, [pZin], INLET_TOP)
+scalar_scene("45 Engine face - total pressure recovery", "PressureRecovery", 0.3, 1.0, [ENGINE], FRONT,
              title="p0 / p0_inf")
 scalar_scene("46 Engine face - Mach", "Mach", 0.0, 1.0, [ENGINE], FRONT)
 
 # exhaust plume
-scalar_scene("50 Plume - Mach", "Mach", 0.0, 2.5, [pY0], TAIL)
+scalar_scene("50 Plume - velocity ratio", "VelocityRatio", 0.0, 2.6, [pY0], TAIL, title="U / U_inf")
 scalar_scene("51 Plume - temperature", "T", 200.0, 2300.0, [pY0], TAIL, title="T [K]")
 scalar_scene("52 Plume - pressure ratio", "PressureRatio", 0.0, 2.0, [pY0], TAIL, title="p / p_inf")
-scalar_scene("53 Plume - Schlieren", "Schlieren", 0.0, 5.0, [pY0], TAIL, cmap="Grayscale")
+scalar_scene("53 Plume - Schlieren", "Schlieren", 0.1, 100.0, [pY0], TAIL, **SCHLIEREN)
 
 # surface quantities
-scalar_scene("60 Surface - Cp (top)", "Cp", -0.4, 1.0, [SURF], ISO_TOP)
-scalar_scene("61 Surface - Cp (bottom)", "Cp", -0.4, 1.0, [SURF], ISO_BOTTOM)
-scalar_scene("62 Surface - Cp (aft)", "Cp", -0.4, 1.0, [SURF], ISO_AFT)
-scalar_scene("63 Surface - wall y+ (top)", "yPlus", 0.0, 150.0, [SURF], ISO_TOP, title="y+")
-scalar_scene("64 Surface - wall y+ (bottom)", "yPlus", 0.0, 150.0, [SURF], ISO_BOTTOM, title="y+")
+scalar_scene("60 Surface - Cp (top)", "Cp", -0.5, 0.5, [SURF], ISO_TOP)
+scalar_scene("61 Surface - Cp (bottom)", "Cp", -0.5, 0.5, [SURF], ISO_BOTTOM)
+scalar_scene("62 Surface - Cp (aft)", "Cp", -0.5, 0.5, [SURF], ISO_AFT)
+scalar_scene("63 Surface - wall y+ (top)", "yPlus", 0.0, 300.0, [SURF], ISO_TOP, title="y+")
+scalar_scene("64 Surface - wall y+ (bottom)", "yPlus", 0.0, 300.0, [SURF], ISO_BOTTOM, title="y+")
 scalar_scene("65 Surface - skin friction Cf (top)", "Cf", 0.0, 0.006, [SURF], ISO_TOP)
 scalar_scene("66 Surface - skin friction Cf (bottom)", "Cf", 0.0, 0.006, [SURF], ISO_BOTTOM)
 scalar_scene("67 Surface - temperature", "T", 200.0, 340.0, [SURF], ISO_TOP, title="T [K]")
