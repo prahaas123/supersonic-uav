@@ -100,10 +100,13 @@ LOCATION_IN_MESH = (-4.0123, 2.0123, 2.0123)   # any point in the fluid with y >
 # =====================================================================================================
 CASE_TEMPLATE    = os.path.join(HERE, "detail_template_supersonic")
 NP               = 50            # MPI processes
-END_TIME         = 0.02          # [s] cap, ~12 flow-throughs of the 1.67 m body
-WRITE_INTERVAL   = END_TIME / 40 # [s] periodic writes so a timed-out job can be resumed (purgeWrite 2)
-MAX_COURANT      = 0.3
-MONITOR_INTERVAL = 10            # time steps between monitor samples
+# Local time stepping (ddtScheme localEuler): a pseudo-time march to the steady state where every cell
+# takes its own largest stable step, so the ~0.1 mm wall and lip cells do not hold back the 0.4 m
+# far-field cells. OpenFOAM time is the iteration count (deltaT 1).
+MAX_ITERATIONS   = 30000         # cap, ~1.1 s each on 50 cores
+WRITE_INTERVAL   = 1000          # [iterations] periodic writes so a timed-out job can be resumed
+MAX_COURANT      = 0.3           # local Courant number of every cell
+MONITOR_INTERVAL = 10            # iterations between monitor samples
 RESUME           = False         # continue a case whose processor* directories survived a timed-out job
 POLL_S           = 120           # [s] between stopping-criterion checks while the solver runs
 # Initial field: "auto" = the finished case on the same mesh closest in (Mach, alpha, beta), converged
@@ -118,9 +121,9 @@ ASYMPTOTE = {
     "Cm_pitch":      5.0e-4,
     "p_engine_face": 50.0,       # [Pa], the free variable at the engine face (mass flow is imposed)
 }
-ASYMPTOTE_WINDOW_S   = 2.0e-3    # [s] ~0.5 body flow-throughs
-ASYMPTOTE_MIN_TIME_S = 6.0e-3    # [s] no check before this time
-ASYMPTOTE_MIN_TIME_INIT_S = 4.0e-3   # [s] the same, for a case started from another case (INIT_FROM)
+ASYMPTOTE_WINDOW        = 2000  # [iterations]
+ASYMPTOTE_MIN_ITER      = 6000  # no check before this iteration
+ASYMPTOTE_MIN_ITER_INIT = 3000  # the same, for a case started from another case (INIT_FROM)
 
 WALL_PATCHES = ("airframe", "inlet_lip", "inlet_duct")
 
@@ -518,6 +521,9 @@ def prepare_case(case, mesh_dir):
         shutil.rmtree(case)
     shutil.copytree(mesh_dir, case, ignore=shutil.ignore_patterns(
         "processor*", "log.*", "*.foam", "metrics.json", "postProcessing"))
+    # solver settings from the template, so a reused mesh does not carry older ones
+    for name in ("controlDict", "fvSchemes", "fvSolution", "fvOptions"):
+        shutil.copy(os.path.join(CASE_TEMPLATE, "system", name), os.path.join(case, "system", name))
     open(os.path.join(case, os.path.basename(os.path.normpath(case)) + ".foam"), "w").close()
 
 
@@ -573,7 +579,7 @@ def find_init_source(case, mesh_dir, flow):
 def initialise_from(case, src, t):
     """Copy the internal fields of src/t into case/0, keeping case/0's boundary conditions.
     Returns a description for metrics.json, or None (fields left at the freestream) on failure."""
-    print(f"  initial field from {src} (t = {t} s)")
+    print(f"  initial field from {src} (iteration {t})")
     fields = [f for f in sorted(os.listdir(os.path.join(case, "0")))
               if os.path.isfile(os.path.join(case, "0", f)) and os.path.isfile(os.path.join(src, t, f))]
     tmp = os.path.join(case, t)
@@ -603,7 +609,7 @@ def initialise_from(case, src, t):
         with open(os.path.join(case, "0", f), "w") as fh:
             fh.write(text)
     print(f"  copied {', '.join(new)}")
-    return f"{os.path.abspath(src)} (t = {t} s)"
+    return f"{os.path.abspath(src)} (iteration {t})"
 
 
 def splice_internal_field(target, source):
@@ -663,8 +669,8 @@ def write_flow_settings(case, f):
         f"sutherlandTs    {v(SUTHERLAND_TS)};", ""]))
     write_text(path("system", "include", "caseVars"), "\n".join([
         "// Written by supersonic_detail_run.py",
-        f"tEnd            {v(END_TIME)};",
-        f"tWrite          {v(WRITE_INTERVAL)};",
+        f"tEnd            {MAX_ITERATIONS};",
+        f"tWrite          {WRITE_INTERVAL};",
         f"maxCourant      {v(MAX_COURANT)};",
         f"monitorInterval {MONITOR_INTERVAL};",
         f"cg              {fmt_vec(CG)};",
@@ -685,7 +691,7 @@ def solve(case, flow, resume):
     proc = subprocess.Popen(f"mpirun -np {NP} rhoCentralFoam -parallel -case {case}", shell=True,
                             executable="/bin/bash", stdout=log, stderr=subprocess.STDOUT)
     reason = "end_time"
-    t_min = min_check_time(case)
+    it_min = min_check_iter(case)
     while True:
         try:
             proc.wait(timeout=POLL_S)
@@ -695,14 +701,14 @@ def solve(case, flow, resume):
         if reason != "end_time":
             continue
         try:
-            status = asymptote_status(histories(case, flow), t_min)
+            status = asymptote_status(histories(case, flow), it_min)
         except Exception as e:          # files mid-write, retry at the next poll
             print(f"  (monitor read failed: {e})")
             continue
         if not status:
             continue
         t = max(s["t"] for s in status.values())
-        print(f"  t = {t:.5g} s | " + " | ".join(
+        print(f"  iteration {t:.0f} | " + " | ".join(
             f"{k} band {s['width']:.3g}{' ok' if s['ok'] else ''}" for k, s in status.items()), flush=True)
         if all(s["ok"] for s in status.values()):
             print("  asymptotic stopping criteria met, writing and stopping")
@@ -730,11 +736,11 @@ def latest_time(case):
     return max(times, key=float) if times else None
 
 
-def min_check_time(case):
-    return ASYMPTOTE_MIN_TIME_INIT_S if read_json(case).get("init_from") else ASYMPTOTE_MIN_TIME_S
+def min_check_iter(case):
+    return ASYMPTOTE_MIN_ITER_INIT if read_json(case).get("init_from") else ASYMPTOTE_MIN_ITER
 
 
-def asymptote_status(hist, t_min):
+def asymptote_status(hist, it_min):
     out = {}
     for name, tol in ASYMPTOTE.items():
         if name not in hist:
@@ -742,9 +748,9 @@ def asymptote_status(hist, t_min):
         t, y = hist[name]
         if len(t) < 2:
             continue
-        mask = t >= t[-1] - ASYMPTOTE_WINDOW_S
+        mask = t >= t[-1] - ASYMPTOTE_WINDOW
         width = float(np.ptp(y[mask]))
-        ok = t[-1] >= t_min and t[-1] - t[0] >= ASYMPTOTE_WINDOW_S and width <= tol
+        ok = t[-1] >= it_min and t[-1] - t[0] >= ASYMPTOTE_WINDOW and width <= tol
         out[name] = {"t": float(t[-1]), "width": width, "tol": tol, "ok": bool(ok)}
     return out
 
@@ -878,7 +884,7 @@ def write_history_csv(case, hist):
     t = hist["CD"][0]
     with open(os.path.join(case, "history.csv"), "w", newline="") as fh:
         w = csv.writer(fh)
-        w.writerow(["time_s"] + names)
+        w.writerow(["iteration"] + names)
         cols = [np.interp(t, *hist[n]) for n in names]
         for i in range(len(t)):
             w.writerow([f"{t[i]:.8g}"] + [f"{c[i]:.8g}" for c in cols])
@@ -898,14 +904,12 @@ REPORT_ORDER = [
 
 
 def reports(case, flow, hist):
-    t_end = float(hist["CD"][0][-1])
-    out = {"t_end_s": t_end, "window_s": ASYMPTOTE_WINDOW_S, "reports": {}, "report_std": {},
-           "report_last": {}}
+    out = {"iterations": int(hist["CD"][0][-1]), "reports": {}, "report_std": {}, "report_last": {}}
     for name in REPORT_ORDER:
         if name not in hist:
             continue
         t, y = hist[name]
-        mask = t >= t[-1] - ASYMPTOTE_WINDOW_S
+        mask = t >= t[-1] - ASYMPTOTE_WINDOW
         out["reports"][name] = float(np.mean(y[mask]))
         out["report_std"][name] = float(np.std(y[mask]))
         out["report_last"][name] = float(y[-1])
@@ -914,7 +918,7 @@ def reports(case, flow, hist):
     st = metrics.window_stats(*hist["CD"], metrics.TAIL_FRACTION)
     out["CD_drift_pct"] = st["drift_pct"] if st else None
 
-    status = asymptote_status(hist, min_check_time(case))
+    status = asymptote_status(hist, min_check_iter(case))
     out["stopping_criteria"] = status
     out["converged"] = bool(status) and all(s["ok"] for s in status.values())
 
@@ -925,7 +929,7 @@ def reports(case, flow, hist):
         P = force_columns(case, f"forces_{patch}", "force.dat")
         if P is None:
             continue
-        mask = P["t"] >= P["t"][-1] - ASYMPTOTE_WINDOW_S
+        mask = P["t"] >= P["t"][-1] - ASYMPTOTE_WINDOW
         mean = lambda arr, i: float(np.mean(arr[mask, i])) * S if arr is not None else float("nan")
         rows.append({"boundary": patch, "Fx_total": mean(P["total"], 0), "Fx_pressure": mean(P["pressure"], 0),
                      "Fx_shear": mean(P["viscous"], 0), "Fz_total": mean(P["total"], 2)})
@@ -987,10 +991,10 @@ def plot_monitors(case, flow, hist, m):
         for n in names:
             t, y = hist[n]
             ax.plot(t, y, linewidth=1.0, label=f"{n} = {m['reports'].get(n, float('nan')):.5g}")
-            tails.append(y[t >= t[-1] - ASYMPTOTE_WINDOW_S])
+            tails.append(y[t >= t[-1] - ASYMPTOTE_WINDOW])
         t_end = max(hist[n][0][-1] for n in names)
-        ax.axvspan(t_end - ASYMPTOTE_WINDOW_S, t_end, color="0.6", alpha=0.25,
-                   label=f"final window ({ASYMPTOTE_WINDOW_S * 1e3:g} ms)")
+        ax.axvspan(t_end - ASYMPTOTE_WINDOW, t_end, color="0.6", alpha=0.25,
+                   label=f"final window ({ASYMPTOTE_WINDOW} iterations)")
         for n in names:
             if n in ASYMPTOTE:
                 s = m["stopping_criteria"].get(n, {})
@@ -1003,7 +1007,7 @@ def plot_monitors(case, flow, hist, m):
         hi = max(float(np.max(x)) for x in tails if len(x))
         pad = max(8.0 * (hi - lo), 0.05 * max(abs(lo), abs(hi)), 1e-9)
         ax.set_ylim(lo - pad, hi + pad)
-        ax.set_xlabel("Time [s]")
+        ax.set_xlabel("Iteration")
         ax.set_ylabel(ylabel)
         ax.grid(True, linestyle="--", alpha=0.6)
         ax.legend(fontsize=8)
@@ -1020,7 +1024,7 @@ def plot_monitors(case, flow, hist, m):
             if all(patch in r for r in yh):
                 ax.plot(t, [r[patch][1] for r in yh], "o-", label=f"{patch} max")
                 ax.plot(t, [r[patch][2] for r in yh], "s--", label=f"{patch} avg")
-        ax.set_xlabel("Time [s]"); ax.set_ylabel("y+"); ax.set_title("Wall y+")
+        ax.set_xlabel("Iteration"); ax.set_ylabel("y+"); ax.set_title("Wall y+")
         ax.grid(True, linestyle="--", alpha=0.6); ax.legend(fontsize=8)
         fig.savefig(os.path.join(out, "plot_Wall_y_.png"), dpi=160, bbox_inches="tight")
         plt.close(fig)
@@ -1065,7 +1069,7 @@ def plot_residuals(case):
     fig, ax = plt.subplots(figsize=(9, 5))
     for name, (tt, vv) in sorted(res.items()):
         ax.semilogy(tt, vv, linewidth=0.8, label=name)
-    ax.set_xlabel("Time [s]"); ax.set_ylabel("Initial residual"); ax.set_title("Residuals")
+    ax.set_xlabel("Iteration"); ax.set_ylabel("Initial residual"); ax.set_title("Residuals")
     ax.grid(True, which="both", linestyle="--", alpha=0.5); ax.legend()
     os.makedirs(os.path.join(case, "plots"), exist_ok=True)
     fig.savefig(os.path.join(case, "plots", "residuals.png"), dpi=160, bbox_inches="tight")
@@ -1109,7 +1113,7 @@ def format_summary(m):
         f" {os.path.basename(m.get('case', ''))}   Mach {f.get('mach')} | alpha {f.get('alpha_deg')} | "
         f"beta {f.get('beta_deg')} | CG {f.get('cg')} | {'half' if f.get('half_model') else 'full'} model",
         bar,
-        f"  stopped by {m.get('stop_reason', '?')} at t = {m.get('t_end_s', float('nan')):.5g} s, "
+        f"  stopped by {m.get('stop_reason', '?')} at iteration {m.get('iterations', float('nan')):.0f}, "
         f"solve time {m.get('solve_time_s', float('nan')):.0f} s, "
         f"{m.get('mesh', {}).get('mesh_cells', '?')} cells",
         f"  initial field: {m.get('init_from') or 'uniform freestream'}",
@@ -1120,7 +1124,7 @@ def format_summary(m):
                      f"satisfied={s['ok']}")
     lines.append(f"  CD drift over the last {100 * metrics.TAIL_FRACTION:.0f}%: "
                  f"{m.get('CD_drift_pct') if m.get('CD_drift_pct') is None else round(m['CD_drift_pct'], 4)} %")
-    lines += ["", f"== Reports (mean over the final {1e3 * m.get('window_s', 0):g} ms, +/- std) =="]
+    lines += ["", f"== Reports (mean over the final {ASYMPTOTE_WINDOW} iterations, +/- std) =="]
     for k in REPORT_ORDER:
         if k in rep:
             lines.append(f"  {k:<32s} {rep[k]:14.6g}   +/- {std.get(k, 0):.3g}")

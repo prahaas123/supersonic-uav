@@ -14,9 +14,10 @@ FoamFile
 }
 // ============================================================================
 
-// End time, write interval, Courant number, monitor interval and the moment reference point are
-// written by supersonic_detail_run.py. The script also sets stopAt to writeNow once the asymptotic
-// stopping criteria are met (runTimeModifiable re-reads this file while the solver runs).
+// Local time stepping (ddtSchemes localEuler): deltaT 1, so time = iteration count, and each cell
+// takes its own step from maxCo. Iteration cap, write interval, Courant number, monitor interval and
+// the moment reference point are written by supersonic_detail_run.py. The script also sets stopAt to
+// writeNow once the asymptotic stopping criteria are met (runTimeModifiable re-reads this file).
 #include "include/caseVars"
 
 application     rhoCentralFoam;
@@ -24,8 +25,8 @@ startFrom       latestTime;
 startTime       0;
 stopAt          endTime;
 endTime         $tEnd;
-deltaT          1e-9;
-writeControl    adjustable;
+deltaT          1;
+writeControl    timeStep;
 writeInterval   $tWrite;
 purgeWrite      2;
 writeFormat     binary;
@@ -34,9 +35,10 @@ writeCompression off;
 timeFormat      general;
 timePrecision   8;
 runTimeModifiable true;
-adjustTimeStep  yes;
+adjustTimeStep  no;
 maxCo           $maxCourant;
-maxDeltaT       1e-4;
+maxDeltaT       1;                // no cap on the local step
+rDeltaTSmoothingCoeff 0.02;      // limits the local step ratio between neighbouring cells
 
 // Monitors run every $monitorInterval time steps. Pressures are absolute (pRef 0) as in the
 // STAR-CCM+ setup, so the walls plus the engine face and exhaust form a closed force balance.

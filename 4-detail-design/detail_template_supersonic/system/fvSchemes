@@ -16,9 +16,10 @@ FoamFile
 
 fluxScheme          Tadmor;
 
+// local time stepping, pseudo-time march to the steady state
 ddtSchemes
 {
-    default         Euler;
+    default         localEuler;
 }
 
 gradSchemes
