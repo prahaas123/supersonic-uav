@@ -1,4 +1,3 @@
-import csv
 import glob
 import hashlib
 import json
@@ -12,9 +11,6 @@ import time
 import numpy as np
 
 HERE = os.path.dirname(os.path.abspath(__file__))
-TOOLS_DIR = os.path.join(HERE, "..", "0-tools")
-sys.path.insert(0, TOOLS_DIR)
-import metrics     # noqa: E402  (_read_dat, window_stats, _start_time, TAIL_FRACTION)
 
 # =====================================================================================================
 # INPUTS
@@ -104,10 +100,9 @@ NP               = 50            # MPI processes
 # takes its own largest stable step, so the ~0.1 mm wall and lip cells do not hold back the 0.4 m
 # far-field cells. OpenFOAM time is the iteration count (deltaT 1).
 MAX_ITERATIONS   = 30000         # cap, ~1.1 s each on 50 cores
-WRITE_INTERVAL   = 1000          # [iterations] periodic writes so a timed-out job can be resumed
+WRITE_INTERVAL   = 1000          # [iterations] field writes (the last two are kept)
 MAX_COURANT      = 0.3           # local Courant number of every cell
 MONITOR_INTERVAL = 10            # iterations between monitor samples
-RESUME           = False         # continue a case whose processor* directories survived a timed-out job
 POLL_S           = 120           # [s] between stopping-criterion checks while the solver runs
 # Initial field: "auto" = the finished case on the same mesh closest in (Mach, alpha, beta), converged
 # cases first; a case path = that case; None = uniform freestream. The internal fields of its latest
@@ -132,26 +127,19 @@ WALL_PATCHES = ("airframe", "inlet_lip", "inlet_duct")
 # =====================================================================================================
 
 def main():
-    if len(sys.argv) >= 3 and sys.argv[1] == "report":
-        case = sys.argv[2]
-        flow = read_json(case).get("flow") or flow_conditions(geometry_info(GEOMETRY), half_model())
-        return finish(case, flow)
-
-    half = half_model()
-    geo = geometry_info(GEOMETRY)
-    flow = flow_conditions(geo, half)
+    half = BETA_DEG == 0.0 if HALF_MODEL is None else bool(HALF_MODEL)
+    flow = flow_conditions(geometry_info(GEOMETRY), half)
     print_conditions(flow)
 
     # 1. Mesh, reused while the mesh settings and the geometry are unchanged
-    mesh_dir = os.path.join(".", f"detail_mesh_{'half' if half else 'full'}")
+    mesh_dir = f"./detail_mesh_{'half' if half else 'full'}"
     settings = mesh_settings(half)
-    if read_json(mesh_dir).get("mesh_settings") == settings and \
-            os.path.isdir(os.path.join(mesh_dir, "constant", "polyMesh")):
+    if read_json(mesh_dir).get("mesh_settings") == settings and os.path.isdir(f"{mesh_dir}/constant/polyMesh"):
         print(f"[mesh] reusing {mesh_dir}")
     else:
         print(f"[mesh] building {mesh_dir} ...")
         t0 = time.perf_counter()
-        prepare_mesh(mesh_dir, settings, half)
+        prepare_mesh(mesh_dir, half)
         if not mesh(mesh_dir):
             print("Error: meshing failed")
             return 1
@@ -160,66 +148,44 @@ def main():
         print(f"[mesh] done in {time.perf_counter() - t0:.0f} s")
 
     # 2. Case
-    case = os.path.join(".", f"detail_M{MACH:g}_a{ALPHA_DEG:g}_b{BETA_DEG:g}")
-    resume = RESUME and os.path.isdir(os.path.join(case, "processor0"))
-    print(f"\n{'=' * 60}\n {os.path.basename(case)}{' (resumed)' if resume else ''}\n{'=' * 60}")
-    if not resume:
-        print("[1/4] Copying the mesh and writing the flow condition ...")
-        prepare_case(case, mesh_dir)
-    write_flow_settings(case, flow)
-    meta = {**read_json(case), "case": os.path.abspath(case), "flow": flow, "mesh": read_json(mesh_dir)}
-    if not resume:
-        src = find_init_source(case, mesh_dir, flow)
-        meta["init_from"] = initialise_from(case, *src) if src else None
-    write_json(case, meta)
+    case = f"./detail_M{MACH:g}_a{ALPHA_DEG:g}_b{BETA_DEG:g}"
+    print(f"\n{'=' * 60}\n {os.path.basename(case)}\n{'=' * 60}")
+    print("[1/4] Copying the mesh and writing the flow condition ...")
+    prepare_case(case, mesh_dir, flow)
+    src = find_init_source(case, mesh_dir)
+    write_json(case, {"case": os.path.abspath(case), "flow": flow, "mesh": read_json(mesh_dir),
+                      "init_from": initialise_from(case, *src) if src else None})
 
     # 3. Solve
     print("[2/4] Solving (rhoCentralFoam) ...")
     t0 = time.perf_counter()
-    ok, stop_reason = solve(case, flow, resume)
-    m = read_json(case)
-    m.update(solve_time_s=round(time.perf_counter() - t0, 1), stop_reason=stop_reason)
+    stop_reason = solve(case, flow)
+    m = {**read_json(case), "solve_time_s": round(time.perf_counter() - t0, 1), "stop_reason": stop_reason}
     write_json(case, m)
-    if not ok:
-        print("Error: solver failed, see log.rhoCentralFoam")
-        m["status"] = "solve_failed"
-        write_json(case, m)
+    if stop_reason not in ("stopping_criteria", "max_iterations"):
+        print(f"Error: {stop_reason}")
         return 1
 
     # 4. Reports, plots, images
-    return finish(case, flow)
-
-
-def finish(case, flow):
     print("[3/4] Reports and monitor plots ...")
     hist = histories(case, flow)
-    if not hist:
-        print("Error: no monitor data in postProcessing")
-        return 1
-    m = read_json(case)
     m.update(reports(case, flow, hist))
     write_json(case, m)
     write_history_csv(case, hist)
-    plot_monitors(case, flow, hist, m)
+    plot_monitors(case, hist, m)
     plot_residuals(case)
 
     print("[4/4] ParaView scenes ...")
     post_process(case)
-    m = read_json(case)
-    text = format_summary(m)
+    text = format_summary(read_json(case))      # detail_post.py adds its checks to metrics.json
     print(text)
     with open(os.path.join(case, "summary.txt"), "w") as fh:
         fh.write(text)
-    sh(f"rm -rf {case}/processor*")
-    return 0 if m.get("converged") else 2
+    return 0 if m["converged"] else 2
 
 # =====================================================================================================
 # Flow condition
 # =====================================================================================================
-
-def half_model():
-    return (BETA_DEG == 0.0) if HALF_MODEL is None else bool(HALF_MODEL)
-
 
 def isa_atmosphere(h):
     g0, T_sl, p_sl, lapse, h_tp, R = 9.80665, 288.15, 101325.0, -0.0065, 11000.0, 287.05287
@@ -229,45 +195,31 @@ def isa_atmosphere(h):
         p *= math.exp(-g0 * (h - h_tp) / (R * T))
     return T, p
 
-
 def sutherland(T):
     return SUTHERLAND_AS * T ** 1.5 / (T + SUTHERLAND_TS)
 
-
-def wind_axes(alpha_deg, beta_deg):
-    a, b = math.radians(alpha_deg), math.radians(beta_deg)
-    drag = (math.cos(a) * math.cos(b), -math.sin(b), math.sin(a) * math.cos(b))   # along the freestream
-    lift = (-math.sin(a), 0.0, math.cos(a))
-    side = (math.cos(a) * math.sin(b), math.cos(b), math.sin(a) * math.sin(b))
-    return drag, lift, side
-
-
 def exhaust_mach(mdot, area, p, T0):
-    # Exit Mach number for a mass flux at static pressure p and total temperature T0
-    flux = mdot / area
+    # Exit Mach number for a mass flux at static pressure p and total temperature T0 (bisection)
     f = lambda M: p * M * math.sqrt(GAMMA * (1.0 + 0.5 * (GAMMA - 1.0) * M * M) / (R_GAS * T0))
     lo, hi = 0.0, 20.0
     for _ in range(100):
         mid = 0.5 * (lo + hi)
-        lo, hi = (mid, hi) if f(mid) < flux else (lo, mid)
+        lo, hi = (mid, hi) if f(mid) < mdot / area else (lo, mid)
     return 0.5 * (lo + hi)
 
-
 def turbulence(U, rho, T, intensity, visc_ratio):
+    # (k, omega, nut) from a turbulence intensity and a viscosity ratio
     k = 1.5 * (intensity * U) ** 2
     nut = visc_ratio * sutherland(T) / rho
     return k, k / nut, nut
 
-
 def flow_conditions(geo, half):
     T, p = isa_atmosphere(ALTITUDE_M)
-    a = math.sqrt(GAMMA * R_GAS * T)
-    U = MACH * a
+    U = MACH * math.sqrt(GAMMA * R_GAS * T)
     rho = p / (R_GAS * T)
-    drag, lift, side = wind_axes(ALPHA_DEG, BETA_DEG)
+    a, b = math.radians(ALPHA_DEG), math.radians(BETA_DEG)
     k, omega, nut = turbulence(U, rho, T, FREESTREAM_TURB_INTENSITY, FREESTREAM_VISC_RATIO)
     iso = 1.0 + 0.5 * (GAMMA - 1.0) * MACH ** 2
-    sym = 2.0 if half else 1.0
 
     # 1D exhaust state (full exhaust area and mass flow)
     mdot_ex = MDOT_AIR + MDOT_FUEL
@@ -276,27 +228,22 @@ def flow_conditions(geo, half):
     U_ex = M_ex * math.sqrt(GAMMA * R_GAS * T_ex)
     rho_ex = P_EXHAUST / (R_GAS * T_ex)
     k_ex, omega_ex, _ = turbulence(U_ex, rho_ex, T_ex, EXHAUST_TURB_INTENSITY, EXHAUST_VISC_RATIO)
-    n_ex = geo["normal"]["exhaust"]               # outward from the body = into the fluid
 
     return dict(
         mach=MACH, alpha_deg=ALPHA_DEG, beta_deg=BETA_DEG, cg=list(CG), altitude_m=ALTITUDE_M,
-        half_model=half, symmetry_factor=sym, gamma=GAMMA, R=R_GAS,
+        half_model=half, symmetry_factor=2.0 if half else 1.0, gamma=GAMMA, R=R_GAS,
         sutherland_As=SUTHERLAND_AS, sutherland_Ts=SUTHERLAND_TS,
-        p_inf=p, T_inf=T, rho_inf=rho, a_inf=a, V_inf=U, mu_inf=sutherland(T),
-        U_vec=[U * c for c in drag], drag_dir=list(drag), lift_dir=list(lift), side_dir=list(side),
+        p_inf=p, T_inf=T, rho_inf=rho, V_inf=U,
+        U_vec=[U * math.cos(a) * math.cos(b), -U * math.sin(b), U * math.sin(a) * math.cos(b)],
         q_inf=0.5 * GAMMA * p * MACH ** 2, p0_inf=p * iso ** (GAMMA / (GAMMA - 1.0)), T0_inf=T * iso,
         k_inf=k, omega_inf=omega, nut_inf=nut,
-        S_ref=S_REF, c_ref=C_REF, b_ref=B_REF,
-        mdot_air=MDOT_AIR, mdot_fuel=MDOT_FUEL, mdot_exhaust=mdot_ex,
-        T0_exhaust=T0_EXHAUST, p_exhaust=P_EXHAUST,
-        engine_face_area=geo["area"]["engine_face"], exhaust_area=geo["area"]["exhaust"],
+        mdot_air=MDOT_AIR, mdot_exhaust=mdot_ex, T0_exhaust=T0_EXHAUST, p_exhaust=P_EXHAUST,
+        engine_face_area=geo["area"]["engine_face"],
         exhaust_mach_1d=M_ex, exhaust_T_1d=T_ex, exhaust_U_1d=U_ex, exhaust_rho_1d=rho_ex,
-        exhaust_supersonic=M_ex >= 1.0, exhaust_U_vec=[U_ex * c for c in n_ex],
+        exhaust_supersonic=M_ex >= 1.0, exhaust_U_vec=[U_ex * c for c in geo["normal"]["exhaust"]],
         exhaust_thrust_1d=mdot_ex * U_ex + (P_EXHAUST - p) * geo["area"]["exhaust"],
         k_exhaust=k_ex, omega_exhaust=omega_ex,
-        wall_temperature=WALL_TEMPERATURE,
     )
-
 
 def print_conditions(f):
     print(f"Mach {f['mach']:g} | alpha {f['alpha_deg']:g} deg | beta {f['beta_deg']:g} deg | "
@@ -313,41 +260,31 @@ def print_conditions(f):
 # Geometry
 # =====================================================================================================
 
-def read_stl(path):
-    # Triangles per solid of an ASCII STL: {name: (n, 3, 3) array}
+def geometry_info(path):
+    # Area and mean outward normal of each solid of an ASCII STL (one solid per named face)
     with open(path, "rb") as fh:
         head = fh.read(512)
     if not head.lstrip().lower().startswith(b"solid") or b"facet" not in head:
         raise SystemExit(f"{path} is not an ASCII STL; export it as ASCII with one solid per named face")
-    solids, name, verts = {}, None, []
+    verts = {}
     with open(path) as fh:
         for line in fh:
             w = line.split()
-            if not w:
-                continue
-            if w[0] == "solid":
-                name, verts = (w[1] if len(w) > 1 else "solid"), []
-            elif w[0] == "vertex":
-                verts.append(w[1:4])
-            elif w[0] == "endsolid":
-                tri = np.asarray(verts, dtype=float).reshape(-1, 3, 3)
-                solids[name] = np.concatenate([solids[name], tri]) if name in solids else tri
-    return solids
-
-
-def geometry_info(path):
-    solids = read_stl(path)
-    area, normal, lo, hi = {}, {}, {}, {}
-    for name, p in solids.items():
-        n = 0.5 * np.cross(p[:, 1] - p[:, 0], p[:, 2] - p[:, 0])
-        area[name] = float(np.linalg.norm(n, axis=1).sum())
-        s = n.sum(axis=0)
-        normal[name] = list(s / np.linalg.norm(s)) if np.linalg.norm(s) > 0 else [0.0, 0.0, 0.0]
-        lo[name], hi[name] = list(p.reshape(-1, 3).min(axis=0)), list(p.reshape(-1, 3).max(axis=0))
+            if w and w[0] == "solid":
+                name = w[1] if len(w) > 1 else "solid"
+            elif w and w[0] == "vertex":
+                verts.setdefault(name, []).append(w[1:4])
     for need in ("airframe", "inlet_lip", "inlet_duct", "engine_face", "exhaust"):
-        if need not in solids:
-            raise SystemExit(f"{path} has no 'solid {need}' (found: {', '.join(solids)})")
-    return {"area": area, "normal": normal, "min": lo, "max": hi}
+        if need not in verts:
+            raise SystemExit(f"{path} has no 'solid {need}' (found: {', '.join(verts)})")
+    area, normal = {}, {}
+    for name, v in verts.items():
+        p = np.asarray(v, dtype=float).reshape(-1, 3, 3)
+        n = 0.5 * np.cross(p[:, 1] - p[:, 0], p[:, 2] - p[:, 0])
+        s = n.sum(axis=0)
+        area[name] = float(np.linalg.norm(n, axis=1).sum())
+        normal[name] = list(s / np.linalg.norm(s)) if np.linalg.norm(s) > 0 else [0.0, 0.0, 0.0]
+    return {"area": area, "normal": normal}
 
 # =====================================================================================================
 # Mesh
@@ -358,7 +295,6 @@ def level(size):
     if abs(n - round(n)) > 1e-6:
         print(f"  note: {size * 1e3:g} mm is not BASE_SIZE / 2^n, using {BASE_SIZE / 2 ** round(n) * 1e3:g} mm")
     return int(round(n))
-
 
 def mesh_settings(half):
     with open(GEOMETRY, "rb") as fh:
@@ -374,16 +310,13 @@ def mesh_settings(half):
     )
     return json.loads(json.dumps(s))     # tuples -> lists, comparable with the stored copy
 
-
 def fmt_vec(v):
     return "(" + " ".join(f"{c:.8g}" for c in v) + ")"
-
 
 def write_text(path, text):
     os.makedirs(os.path.dirname(path), exist_ok=True)
     with open(path, "w") as fh:
         fh.write(text)
-
 
 def sub(path, pattern, repl):
     with open(path) as fh:
@@ -393,10 +326,10 @@ def sub(path, pattern, repl):
     with open(path, "w") as fh:
         fh.write(text)
 
-
-def prepare_mesh(mesh_dir, s, half):
-    if os.path.exists(mesh_dir):
-        shutil.rmtree(mesh_dir)
+def prepare_mesh(mesh_dir, half):
+    if half and LOCATION_IN_MESH[1] <= 0:
+        raise SystemExit("LOCATION_IN_MESH must have y > 0 on a half model")
+    shutil.rmtree(mesh_dir, ignore_errors=True)
     shutil.copytree(CASE_TEMPLATE, mesh_dir, ignore=shutil.ignore_patterns("*.foam"))
     path = lambda *p: os.path.join(mesh_dir, *p)
     os.makedirs(path("constant", "triSurface"), exist_ok=True)
@@ -446,13 +379,9 @@ def prepare_mesh(mesh_dir, s, half):
                    f"{k} {{ mode inside; levels ((1e15 {level(sz)})); }}\n"
                    for k, (_, _, sz) in REFINEMENT_BOXES.items()))
     sub(path("system", "decomposeParDict"), r"^numberOfSubdomains\s+\d+;", f"numberOfSubdomains  {NP};")
-    if half and LOCATION_IN_MESH[1] <= 0:
-        raise SystemExit("LOCATION_IN_MESH must have y > 0 on a half model")
-
 
 def sh(cmd):
     return subprocess.run(cmd, shell=True, executable="/bin/bash").returncode
-
 
 def run_steps(case, steps):
     for app, cmd in steps:
@@ -464,7 +393,6 @@ def run_steps(case, steps):
             return False
     return True
 
-
 def mesh(c):
     ok = run_steps(c, [
         ("surfaceFeatureExtract", f"surfaceFeatureExtract -case {c}"),
@@ -474,18 +402,11 @@ def mesh(c):
         ("reconstructParMesh",    f"reconstructParMesh -constant -case {c}"),
     ])
     sh(f"rm -rf {c}/processor*")
-    if ok:
-        sh(f"checkMesh -constant -case {c} > {c}/log.checkMesh 2>&1")   # quality report, reference only
-        print_layer_table(c)
-    return ok and os.path.isdir(os.path.join(c, "constant", "polyMesh"))
-
-
-def print_layer_table(c):
-    # Prism-layer coverage per patch from the end of the snappyHexMesh log
-    try:
-        lines = open(os.path.join(c, "log.snappyHexMesh")).read().splitlines()
-    except OSError:
-        return
+    if not ok:
+        return False
+    sh(f"checkMesh -constant -case {c} > {c}/log.checkMesh 2>&1")   # quality report, reference only
+    # Prism-layer coverage per patch, the table at the end of the snappyHexMesh log
+    lines = open(os.path.join(c, "log.snappyHexMesh")).read().splitlines()
     start = max((i for i, l in enumerate(lines) if l.strip().startswith("patch") and "layers" in l), default=None)
     if start is not None:
         print("  prism layers:")
@@ -493,147 +414,36 @@ def print_layer_table(c):
             if not l.strip():
                 break
             print("   " + l)
-
+    return True
 
 def mesh_stats(c):
-    out = {}
-    try:
-        text = open(os.path.join(c, "log.checkMesh")).read()
-        for key in ("cells", "faces", "points"):
-            m = re.search(rf"^\s*{key}:\s+(\d+)", text, flags=re.M)
-            if m:
-                out[f"mesh_{key}"] = int(m.group(1))
-        m = re.search(r"Mesh non-orthogonality Max:\s+(\S+)", text)
-        out["max_non_orthogonality"] = float(m.group(1)) if m else None
-        m = re.search(r"Max skewness = ([-+0-9.eE]+)", text)
-        out["max_skewness"] = float(m.group(1)) if m else None
-        out["checkMesh_ok"] = "Mesh OK." in text
-    except OSError:
-        pass
-    return out
+    text = open(os.path.join(c, "log.checkMesh")).read()
+
+    def find(pattern):
+        m = re.search(pattern, text, flags=re.M)
+        return float(m.group(1)) if m else None
+
+    return {"mesh_cells": int(find(r"^\s*cells:\s+(\d+)") or 0),
+            "max_non_orthogonality": find(r"Mesh non-orthogonality Max:\s+(\S+)"),
+            "max_skewness": find(r"Max skewness = ([-+0-9.eE]+)"),
+            "checkMesh_ok": "Mesh OK." in text}
 
 # =====================================================================================================
 # Case
 # =====================================================================================================
 
-def prepare_case(case, mesh_dir):
-    if os.path.exists(case):
-        shutil.rmtree(case)
+def prepare_case(case, mesh_dir, f):
+    shutil.rmtree(case, ignore_errors=True)
     shutil.copytree(mesh_dir, case, ignore=shutil.ignore_patterns(
         "processor*", "log.*", "*.foam", "metrics.json", "postProcessing"))
     # solver settings from the template, so a reused mesh does not carry older ones
     for name in ("controlDict", "fvSchemes", "fvSolution", "fvOptions"):
         shutil.copy(os.path.join(CASE_TEMPLATE, "system", name), os.path.join(case, "system", name))
-    open(os.path.join(case, os.path.basename(os.path.normpath(case)) + ".foam"), "w").close()
+    open(os.path.join(case, os.path.basename(case) + ".foam"), "w").close()
 
-
-def mesh_signature(c):
-    # "nPoints:.. nCells:.. nFaces:.. nInternalFaces:.." from the owner file header (ASCII in binary files too)
-    try:
-        with open(os.path.join(c, "constant", "polyMesh", "owner"), "rb") as fh:
-            head = fh.read(4096).decode("ascii", "replace")
-    except OSError:
-        return None
-    m = re.search(r'note\s+"([^"]*)"', head)
-    return " ".join(m.group(1).split()) if m else None
-
-
-def find_init_source(case, mesh_dir, flow):
-    """(case, time) of the solution to start from, or None (see INIT_FROM)."""
-    if not INIT_FROM:
-        return None
-    settings, sig = read_json(mesh_dir).get("mesh_settings"), mesh_signature(mesh_dir)
-    explicit = INIT_FROM != "auto"
-    paths = [INIT_FROM] if explicit else sorted(glob.glob(os.path.join(".", "detail_M*_a*_b*")))
-    found = []
-    for src in paths:
-        reason = None
-        if os.path.abspath(src) == os.path.abspath(case):
-            reason = "it is this case"
-        elif not os.path.isdir(src):
-            reason = "not found"
-        elif read_json(src).get("mesh", {}).get("mesh_settings") != settings or mesh_signature(src) != sig:
-            reason = "different mesh"
-        elif latest_time(src) is None:
-            reason = "no reconstructed solution"
-        if reason:
-            if explicit:
-                print(f"  INIT_FROM {src}: {reason}, starting from the freestream")
-            continue
-        m = read_json(src)
-        f = m.get("flow", {})
-        try:
-            d = (10.0 * abs(f["mach"] - flow["mach"]) + abs(f["alpha_deg"] - flow["alpha_deg"])
-                 + abs(f["beta_deg"] - flow["beta_deg"]))
-        except (KeyError, TypeError):
-            d = math.inf
-        found.append((not m.get("converged"), d, src))
-    if not found:
-        if not explicit:
-            print("  no finished case on the same mesh, starting from the freestream")
-        return None
-    src = min(found)[2]
-    return src, latest_time(src)
-
-
-def initialise_from(case, src, t):
-    """Copy the internal fields of src/t into case/0, keeping case/0's boundary conditions.
-    Returns a description for metrics.json, or None (fields left at the freestream) on failure."""
-    print(f"  initial field from {src} (iteration {t})")
-    fields = [f for f in sorted(os.listdir(os.path.join(case, "0")))
-              if os.path.isfile(os.path.join(case, "0", f)) and os.path.isfile(os.path.join(src, t, f))]
-    tmp = os.path.join(case, t)
-    os.makedirs(tmp, exist_ok=True)
-    for f in fields:
-        shutil.copy(os.path.join(src, t, f), tmp)
-    # foamFormatConvert rewrites the copied fields in ASCII so their internalField can be spliced as text
-    cdict = os.path.join(case, "system", "controlDict")
-    with open(cdict) as fh:
-        fmt = re.search(r"^writeFormat\s+(\w+);", fh.read(), flags=re.M).group(1)
-    sub(cdict, r"^writeFormat\s+\w+;", "writeFormat     ascii;")
-    new = {}
-    try:
-        if run_steps(case, [("foamFormatConvert", f"foamFormatConvert -noConstant -time {t} -case {case}")]):
-            for f in fields:          # all fields spliced in memory first, so a failure leaves 0/ untouched
-                new[f] = splice_internal_field(os.path.join(case, "0", f), os.path.join(tmp, f))
-    except (OSError, ValueError) as e:
-        print(f"  could not copy the fields ({e})")
-        new = {}
-    finally:
-        sub(cdict, r"^writeFormat\s+\w+;", f"writeFormat     {fmt};")
-        shutil.rmtree(tmp, ignore_errors=True)
-    if not new:
-        print("  starting from the freestream instead")
-        return None
-    for f, text in new.items():
-        with open(os.path.join(case, "0", f), "w") as fh:
-            fh.write(text)
-    print(f"  copied {', '.join(new)}")
-    return f"{os.path.abspath(src)} (iteration {t})"
-
-
-def splice_internal_field(target, source):
-    """target's text with its internalField entry replaced by source's (ASCII)."""
-    with open(source) as fh:
-        src = fh.read()
-    if not re.search(r"^\s*format\s+ascii;", src[:2000], flags=re.M):
-        raise ValueError(f"{source} is not ASCII")
-    i = src.find("\ninternalField")
-    j = src.find("\nboundaryField", i)
-    if i < 0 or j < 0:
-        raise ValueError(f"no internalField in {source}")
-    internal = src[i + 1:j].rstrip()
-    with open(target) as fh:
-        text, n = re.subn(r"^internalField\b[^;]*;", lambda _: internal, fh.read(), count=1, flags=re.M)
-    if n != 1:
-        raise ValueError(f"no internalField in {target}")
-    return text
-
-
-def write_flow_settings(case, f):
     path = lambda *p: os.path.join(case, *p)
-    sym = f["symmetry_factor"]
     v = lambda x: f"{x:.8g}"
+    sym = f["symmetry_factor"]
     write_text(path("0", "include", "flowVars"), "\n".join([
         "// Written by supersonic_detail_run.py",
         f"Uinf            {fmt_vec(f['U_vec'])};",
@@ -644,8 +454,7 @@ def write_flow_settings(case, f):
         f"omegaInf        {v(f['omega_inf'])};",
         f"nutInf          {v(f['nut_inf'])};",
         f"Prt             {v(PRANDTL_TURB)};",
-        f"mdotEngineFace  {v(f['mdot_air'] / sym)};      // per simulated half" if sym > 1 else
-        f"mdotEngineFace  {v(f['mdot_air'])};",
+        f"mdotEngineFace  {v(f['mdot_air'] / sym)};      // per simulated model (half or full)",
         f"T0inf           {v(f['T0_inf'])};",
         f"mdotExhaust     {v(f['mdot_exhaust'] / sym)};",
         f"T0Exhaust       {v(f['T0_exhaust'])};",
@@ -675,403 +484,277 @@ def write_flow_settings(case, f):
         f"monitorInterval {MONITOR_INTERVAL};",
         f"cg              {fmt_vec(CG)};",
         f"rhoInfRef       {v(f['rho_inf'])};", ""]))
-    sub(path("system", "controlDict"), r"^stopAt\s+\w+;", "stopAt          endTime;")
     sub(path("system", "decomposeParDict"), r"^numberOfSubdomains\s+\d+;", f"numberOfSubdomains  {NP};")
+
+def latest_time(case):
+    times = [d for d in os.listdir(case) if re.fullmatch(r"[0-9.eE+-]+", d) and float(d) > 0]
+    return max(times, key=float) if times else None
+
+def mesh_signature(c):
+    # "nPoints:.. nCells:.. nFaces:.. nInternalFaces:.." from the owner file header (ASCII in binary files too)
+    try:
+        with open(os.path.join(c, "constant", "polyMesh", "owner"), "rb") as fh:
+            m = re.search(r'note\s+"([^"]*)"', fh.read(4096).decode("ascii", "replace"))
+    except OSError:
+        return None
+    return " ".join(m.group(1).split()) if m else None
+
+def find_init_source(case, mesh_dir):
+    """(case, latest time) of the solution to start from (see INIT_FROM), or None."""
+    if not INIT_FROM:
+        return None
+    sig = mesh_signature(mesh_dir)
+    found = []
+    for src in glob.glob("./detail_M*_a*_b*") if INIT_FROM == "auto" else [INIT_FROM]:
+        if os.path.abspath(src) == os.path.abspath(case) or mesh_signature(src) != sig or not latest_time(src):
+            continue
+        m = read_json(src)
+        f = m.get("flow", {})
+        d = (10.0 * abs(f.get("mach", math.inf) - MACH) + abs(f.get("alpha_deg", math.inf) - ALPHA_DEG)
+             + abs(f.get("beta_deg", math.inf) - BETA_DEG))
+        found.append((not m.get("converged"), d, src))
+    if not found:
+        print("  no solution on the same mesh to start from, starting from the freestream")
+        return None
+    src = min(found)[2]
+    return src, latest_time(src)
+
+def initialise_from(case, src, t):
+    """Copy the internal fields of src/t into case/0, keeping case/0's boundary conditions.
+    Returns a description for metrics.json, or None (fields left at the freestream) on failure."""
+    print(f"  initial field from {src} (iteration {t})")
+    fields = [f for f in sorted(os.listdir(os.path.join(case, "0"))) if os.path.isfile(os.path.join(src, t, f))]
+    tmp = os.path.join(case, t)
+    os.makedirs(tmp, exist_ok=True)
+    for f in fields:
+        shutil.copy(os.path.join(src, t, f), tmp)
+    # foamFormatConvert rewrites the copied fields in ASCII so their internalField can be spliced as text
+    cdict = os.path.join(case, "system", "controlDict")
+    sub(cdict, r"^writeFormat\s+binary;", "writeFormat     ascii;")
+    new = {}
+    try:
+        if run_steps(case, [("foamFormatConvert", f"foamFormatConvert -noConstant -time {t} -case {case}")]):
+            for f in fields:          # all fields spliced in memory first, so a failure leaves 0/ untouched
+                new[f] = splice_internal_field(os.path.join(case, "0", f), os.path.join(tmp, f))
+    except (OSError, ValueError) as e:
+        print(f"  could not copy the fields ({e})")
+        new = {}
+    finally:
+        sub(cdict, r"^writeFormat\s+ascii;", "writeFormat     binary;")
+        shutil.rmtree(tmp, ignore_errors=True)
+    if not new:
+        print("  starting from the freestream instead")
+        return None
+    for f, text in new.items():
+        write_text(os.path.join(case, "0", f), text)
+    print(f"  copied {', '.join(new)}")
+    return f"{os.path.abspath(src)} (iteration {t})"
+
+def splice_internal_field(target, source):
+    """target's text with its internalField entry replaced by source's (ASCII)."""
+    with open(source) as fh:
+        src = fh.read()
+    i = src.find("\ninternalField")
+    j = src.find("\nboundaryField", i)
+    if not re.search(r"^\s*format\s+ascii;", src[:2000], flags=re.M) or i < 0 or j < 0:
+        raise ValueError(f"no ASCII internalField in {source}")
+    with open(target) as fh:
+        text, n = re.subn(r"^internalField\b[^;]*;", lambda _: src[i + 1:j].rstrip(), fh.read(), count=1,
+                          flags=re.M)
+    if n != 1:
+        raise ValueError(f"no internalField in {target}")
+    return text
 
 # =====================================================================================================
 # Solve with the asymptotic stopping criteria
 # =====================================================================================================
 
-def solve(case, flow, resume):
-    if not resume and not run_steps(case, [("decomposePar", f"decomposePar -force -case {case}")]):
-        return False, "decompose_failed"
-
+def solve(case, flow):
+    """Run the solver, stop it once the stopping criteria hold. Returns the stop reason."""
+    if not run_steps(case, [("decomposePar", f"decomposePar -force -case {case}")]):
+        return "decomposePar failed"
     print(f"  -> mpirun -np {NP} rhoCentralFoam -parallel   (log.rhoCentralFoam)")
-    log = open(os.path.join(case, "log.rhoCentralFoam"), "a")
-    proc = subprocess.Popen(f"mpirun -np {NP} rhoCentralFoam -parallel -case {case}", shell=True,
-                            executable="/bin/bash", stdout=log, stderr=subprocess.STDOUT)
-    reason = "end_time"
-    it_min = min_check_iter(case)
-    while True:
-        try:
-            proc.wait(timeout=POLL_S)
-            break
-        except subprocess.TimeoutExpired:
-            pass
-        if reason != "end_time":
-            continue
-        try:
-            status = asymptote_status(histories(case, flow), it_min)
-        except Exception as e:          # files mid-write, retry at the next poll
-            print(f"  (monitor read failed: {e})")
-            continue
-        if not status:
-            continue
-        t = max(s["t"] for s in status.values())
-        print(f"  iteration {t:.0f} | " + " | ".join(
-            f"{k} band {s['width']:.3g}{' ok' if s['ok'] else ''}" for k, s in status.items()), flush=True)
-        if all(s["ok"] for s in status.values()):
-            print("  asymptotic stopping criteria met, writing and stopping")
-            sub(os.path.join(case, "system", "controlDict"), r"^stopAt\s+\w+;", "stopAt          writeNow;")
-            reason = "asymptotic_criteria"
-    log.close()
+    with open(os.path.join(case, "log.rhoCentralFoam"), "w") as log:
+        proc = subprocess.Popen(f"mpirun -np {NP} rhoCentralFoam -parallel -case {case}", shell=True,
+                                executable="/bin/bash", stdout=log, stderr=subprocess.STDOUT)
+        reason = "max_iterations"
+        it_min = ASYMPTOTE_MIN_ITER_INIT if read_json(case).get("init_from") else ASYMPTOTE_MIN_ITER
+        while proc.poll() is None:
+            time.sleep(POLL_S)
+            if reason != "max_iterations":
+                continue
+            try:
+                hist = histories(case, flow)
+            except (OSError, ValueError, IndexError, TypeError) as e:   # files mid-write, retry next poll
+                print(f"  (monitor read failed: {e})")
+                continue
+            status = asymptote_status(hist, it_min)
+            print(f"  iteration {hist['t'][-1]:.0f} | " + " | ".join(
+                f"{k} band {s['width']:.3g}{' ok' if s['ok'] else ''}" for k, s in status.items()), flush=True)
+            if all(s["ok"] for s in status.values()):
+                print("  stopping criteria met, writing and stopping")
+                sub(os.path.join(case, "system", "controlDict"), r"^stopAt\s+\w+;", "stopAt          writeNow;")
+                reason = "stopping_criteria"
     if proc.returncode != 0:
         sh(f"tail -n 30 {case}/log.rhoCentralFoam")
-        return False, "solver_error"
-
+        return "rhoCentralFoam failed"
     ok = run_steps(case, [("reconstructPar", f"reconstructPar -latestTime -case {case}")])
-    sub(os.path.join(case, "system", "controlDict"), r"^stopAt\s+\w+;", "stopAt          endTime;")
     sh(f"rm -rf {case}/processor*")
-    return ok and latest_time(case) is not None, reason
-
-
-def latest_time(case):
-    times = []
-    for d in os.listdir(case):
-        try:
-            if float(d) > 0 and os.path.isdir(os.path.join(case, d)):
-                times.append(d)
-        except ValueError:
-            pass
-    return max(times, key=float) if times else None
-
-
-def min_check_iter(case):
-    return ASYMPTOTE_MIN_ITER_INIT if read_json(case).get("init_from") else ASYMPTOTE_MIN_ITER
-
+    return reason if ok else "reconstructPar failed"
 
 def asymptote_status(hist, it_min):
+    t = hist["t"]
+    window = t >= t[-1] - ASYMPTOTE_WINDOW
     out = {}
     for name, tol in ASYMPTOTE.items():
-        if name not in hist:
-            continue
-        t, y = hist[name]
-        if len(t) < 2:
-            continue
-        mask = t >= t[-1] - ASYMPTOTE_WINDOW
-        width = float(np.ptp(y[mask]))
-        ok = t[-1] >= it_min and t[-1] - t[0] >= ASYMPTOTE_WINDOW and width <= tol
-        out[name] = {"t": float(t[-1]), "width": width, "tol": tol, "ok": bool(ok)}
+        width = float(np.ptp(hist[name][window]))
+        out[name] = {"width": width, "tol": tol, "ok": bool(t[-1] >= it_min and width <= tol)}
     return out
 
 # =====================================================================================================
-# Monitors (time histories, complete aircraft)
+# Monitors (iteration histories, complete aircraft)
 # =====================================================================================================
 
-def read_columns(case, fo, fname, min_cols=2):
-    # (time, columns) from postProcessing/<fo>/*/<fname>, column names from the "# Time" header
-    t, data = metrics._read_dat(case, fo, fname, min_cols)
-    if t is None:
-        return None, None, []
-    names = []
-    for path in metrics.dat_files(case, fo, fname):
-        with open(path) as fh:
-            for line in fh:
-                if line.startswith("# Time"):
-                    names = line.lstrip("#").split()[1:]
-                    break
-    return t, data, names
-
-
-def force_columns(case, fo, fname):
-    # total, pressure, viscous vectors from a forces function object file
-    t, d, names = read_columns(case, fo, fname, 4)
-    if t is None:
-        return None
-    idx = lambda key, j: names.index(key) if key in names else j
-    out = {"t": t}
-    for k, (part, j) in enumerate((("total", 0), ("pressure", 3), ("viscous", 6))):
-        cols = [idx(f"{part}_{a}", j + i) for i, a in enumerate("xyz")]
-        out[part] = d[:, cols] if d.shape[1] > max(cols) else None
-    return out
-
+def read_dat(case, fo, fname):
+    """(iterations, value columns) of postProcessing/<fo>/0/<fname>; vectors "(x y z)" give 3 columns."""
+    rows = []
+    with open(os.path.join(case, "postProcessing", fo, "0", fname)) as fh:
+        for line in fh:
+            if not line.startswith("#"):
+                try:
+                    rows.append([float(v) for v in line.replace("(", " ").replace(")", " ").split()])
+                except ValueError:
+                    pass
+    rows = [r for r in rows if len(r) == len(rows[0])]     # drops a line still being written
+    d = np.asarray(rows)
+    return d[:, 0], d[:, 1:]
 
 def histories(case, f):
-    S = f["symmetry_factor"]
-    half = f["half_model"]
-    qS = f["q_inf"] * S_REF
+    """{"t": iterations, name: values} for the complete aircraft, all on the iterations of the forces."""
+    S, qS = f["symmetry_factor"], f["q_inf"] * S_REF
     a, b = math.radians(ALPHA_DEG), math.radians(BETA_DEG)
     ca, sa, cb, sb = math.cos(a), math.sin(a), math.cos(b), math.sin(b)
-    h = {}
+    t, force = read_dat(case, "forces", "force.dat")
 
-    def full(vec):
-        # complete aircraft: double x and z, drop y (a half model has no net side force / roll / yaw)
-        v = vec * S
-        if half:
-            v[:, 1] = 0.0
-        return v
+    def on_t(fo, fname, col):      # one column of another monitor file, on the force iterations
+        tt, d = read_dat(case, fo, fname)
+        return np.interp(t, tt, d[:, col])
 
-    def full_moment(vec):
-        v = vec * S
-        if half:
-            v[:, 0] = 0.0
-            v[:, 2] = 0.0
-        return v
-
-    F = force_columns(case, "forces", "force.dat")
-    M = force_columns(case, "forces", "moment.dat")
-    if F is None:
-        return {}
-    t = F["t"]
-    Fb = full(F["total"])
-    Fx, Fy, Fz = Fb[:, 0], Fb[:, 1], Fb[:, 2]
-    for i, ax in enumerate("xyz"):
-        h[f"F{ax}_body"] = (t, Fb[:, i])
+    Fx, Fy, Fz = (S * force[:, i] for i in range(3))
+    Mx, My, Mz = (S * on_t("forces", "moment.dat", i) for i in range(3))
     drag = Fx * ca * cb - Fy * sb + Fz * sa * cb
     lift = -Fx * sa + Fz * ca
-    side = Fx * ca * sb + Fy * cb + Fz * sa * sb
-    h.update(Drag=(t, drag), Lift=(t, lift), SideForce=(t, side),
-             CD=(t, drag / qS), CL=(t, lift / qS), CY=(t, side / qS),
-             L_over_D=(t, np.divide(lift, drag, out=np.zeros_like(lift), where=np.abs(drag) > 1e-12)))
-    if M is not None:
-        Mc = full_moment(M["total"])
-        n = min(len(M["t"]), len(Mc))
-        tm = M["t"][:n]
-        for i, ax in enumerate("xyz"):
-            h[f"M{ax}_cg"] = (tm, Mc[:n, i])
-        # aircraft sign convention: Cm > 0 nose up, Cl > 0 starboard wing down, Cn > 0 nose to starboard
-        h["Cm_pitch"] = (tm, Mc[:n, 1] / (qS * C_REF))
-        h["Cl_roll"] = (tm, -Mc[:n, 0] / (qS * B_REF))
-        h["Cn_yaw"] = (tm, -Mc[:n, 2] / (qS * B_REF))
+    # aircraft sign convention: Cm > 0 nose up, Cl > 0 starboard wing down, Cn > 0 nose to starboard
+    h = {"t": t, "Fx_body": Fx, "Fz_body": Fz, "My_cg": My, "Drag": drag, "Lift": lift,
+         "CD": drag / qS, "CL": lift / qS, "L_over_D": lift / drag, "Cm_pitch": My / (qS * C_REF)}
+    if not f["half_model"]:     # zero by symmetry on a half model
+        side = Fx * ca * sb + Fy * cb + Fz * sa * sb
+        h.update(Fy_body=Fy, Mx_cg=Mx, Mz_cg=Mz, SideForce=side, CY=side / qS,
+                 Cl_roll=-Mx / (qS * B_REF), Cn_yaw=-Mz / (qS * B_REF))
 
-    # Engine face and exhaust
-    def sfv(fo, col=0, scale=1.0):
-        tt, d, _ = read_columns(case, fo, "surfaceFieldValue.dat")
-        return None if tt is None or d.shape[1] <= col else (tt, d[:, col] * scale)
+    sfv = "surfaceFieldValue.dat"
+    h["p_engine_face"], h["Mach_engine_face"], h["T_engine_face"] = (
+        on_t("engine_face_average", sfv, i) for i in range(3))
+    h["PressureRecovery_engine_face"] = on_t("engine_face_p0", sfv, 0) / f["p0_inf"]
 
-    for key, fo, col, scale in [
-            ("mdot_engine_face", "mdot_engine_face", 0, S),
-            ("mdot_exhaust", "mdot_exhaust", 0, -S),          # positive = into the domain
-            ("p_engine_face", "engine_face_average", 0, 1.0),
-            ("Mach_engine_face", "engine_face_average", 1, 1.0),
-            ("T_engine_face", "engine_face_average", 2, 1.0),
-            ("p_exhaust", "exhaust_average", 0, 1.0),
-            ("Mach_exhaust", "exhaust_average", 1, 1.0),
-            ("T_exhaust", "exhaust_average", 2, 1.0)]:
-        r = sfv(fo, col, scale)
-        if r:
-            h[key] = r
-    r = sfv("engine_face_p0")
-    if r:
-        h["PressureRecovery_engine_face"] = (r[0], r[1] / f["p0_inf"])
-
-    # Stream thrust: integral of p n + rho u (u.n) over the engine face / exhaust, n out of the fluid.
-    # Fx_net = walls + engine face + exhaust = net axial force on the vehicle with its engine stream tube
-    # (> 0 net drag, < 0 net thrust); same as STAR's Fx_body + StreamThrust_face - StreamThrust_exhaust.
-    for port in ("engine_face", "exhaust"):
-        P = force_columns(case, f"forces_{port}", "force.dat")
-        tt, mom, _ = read_columns(case, f"{port}_momentum", "surfaceFieldValue.dat", 4)
-        if P is None or tt is None or P["pressure"] is None:
-            continue
-        pf = full(P["pressure"])
-        mf = full(mom[:, :3].copy())
-        I = np.column_stack([np.interp(t, P["t"], pf[:, i]) + np.interp(t, tt, mf[:, i]) for i in range(3)])
-        h[f"I_{port}_x"] = (t, I[:, 0])
-        h[f"I_{port}_z"] = (t, I[:, 2])
-    if "I_engine_face_x" in h and "I_exhaust_x" in h:
-        h["StreamThrust_engine_face"] = (t, h["I_engine_face_x"][1])
-        h["StreamThrust_exhaust"] = (t, -h["I_exhaust_x"][1])
-        fx_net = Fx + h["I_engine_face_x"][1] + h["I_exhaust_x"][1]
-        fz_net = Fz + h["I_engine_face_z"][1] + h["I_exhaust_z"][1]
-        h["Fx_net_with_engine"] = (t, fx_net)
-        h["Fz_net_with_engine"] = (t, fz_net)
-        h["CX_net_with_engine"] = (t, fx_net / qS)
+    # Stream thrust: x of the integral of p n + rho u (u.n) over a port, n out of the fluid. The net axial
+    # force on the vehicle with its engine stream tube is walls + engine face + exhaust (> 0 net drag,
+    # < 0 net thrust), as STAR's Fx_body + StreamThrust_face - StreamThrust_exhaust.
+    I = {p: S * (on_t(f"forces_{p}", "force.dat", 3) + on_t(f"{p}_momentum", sfv, 0))
+         for p in ("engine_face", "exhaust")}
+    h["StreamThrust_engine_face"], h["StreamThrust_exhaust"] = I["engine_face"], -I["exhaust"]
+    h["Fx_net_with_engine"] = Fx + I["engine_face"] + I["exhaust"]
+    h["CX_net_with_engine"] = h["Fx_net_with_engine"] / qS
     return h
 
-
 def write_history_csv(case, hist):
-    names = sorted(hist)
-    t = hist["CD"][0]
-    with open(os.path.join(case, "history.csv"), "w", newline="") as fh:
-        w = csv.writer(fh)
-        w.writerow(["iteration"] + names)
-        cols = [np.interp(t, *hist[n]) for n in names]
-        for i in range(len(t)):
-            w.writerow([f"{t[i]:.8g}"] + [f"{c[i]:.8g}" for c in cols])
+    np.savetxt(os.path.join(case, "history.csv"), np.column_stack(list(hist.values())), fmt="%.8g",
+               delimiter=",", header=",".join(["iteration"] + list(hist)[1:]), comments="")
 
 # =====================================================================================================
 # Reports
 # =====================================================================================================
 
-REPORT_ORDER = [
-    "Fx_body", "Fy_body", "Fz_body", "Mx_cg", "My_cg", "Mz_cg",
-    "Drag", "Lift", "SideForce", "CD", "CL", "CY", "L_over_D", "Cm_pitch", "Cl_roll", "Cn_yaw",
-    "mdot_engine_face", "mdot_exhaust", "PressureRecovery_engine_face", "Mach_engine_face",
-    "p_engine_face", "T_engine_face", "p_exhaust", "Mach_exhaust", "T_exhaust",
-    "StreamThrust_engine_face", "StreamThrust_exhaust", "Fx_net_with_engine", "Fz_net_with_engine",
-    "CX_net_with_engine",
-]
-
-
 def reports(case, flow, hist):
-    out = {"iterations": int(hist["CD"][0][-1]), "reports": {}, "report_std": {}, "report_last": {}}
-    for name in REPORT_ORDER:
-        if name not in hist:
-            continue
-        t, y = hist[name]
-        mask = t >= t[-1] - ASYMPTOTE_WINDOW
-        out["reports"][name] = float(np.mean(y[mask]))
-        out["report_std"][name] = float(np.std(y[mask]))
-        out["report_last"][name] = float(y[-1])
-
-    # Drift over the last metrics.TAIL_FRACTION of the run (same check as the DSE cases)
-    st = metrics.window_stats(*hist["CD"], metrics.TAIL_FRACTION)
-    out["CD_drift_pct"] = st["drift_pct"] if st else None
-
-    status = asymptote_status(hist, min_check_iter(case))
-    out["stopping_criteria"] = status
-    out["converged"] = bool(status) and all(s["ok"] for s in status.values())
-
-    # Per-wall breakdown (complete aircraft), as uav_breakdown.java
-    rows = []
-    S = flow["symmetry_factor"]
+    window = hist["t"] >= hist["t"][-1] - ASYMPTOTE_WINDOW
+    it_min = ASYMPTOTE_MIN_ITER_INIT if read_json(case).get("init_from") else ASYMPTOTE_MIN_ITER
+    status = asymptote_status(hist, it_min)
+    out = {"iterations": int(hist["t"][-1]),
+           "reports": {k: float(np.mean(y[window])) for k, y in hist.items() if k != "t"},
+           "report_std": {k: float(np.std(y[window])) for k, y in hist.items() if k != "t"},
+           "stopping_criteria": status, "converged": all(s["ok"] for s in status.values()),
+           "breakdown": []}
+    # Per-wall axial force breakdown (complete aircraft), as uav_breakdown.java
     for patch in WALL_PATCHES:
-        P = force_columns(case, f"forces_{patch}", "force.dat")
-        if P is None:
-            continue
-        mask = P["t"] >= P["t"][-1] - ASYMPTOTE_WINDOW
-        mean = lambda arr, i: float(np.mean(arr[mask, i])) * S if arr is not None else float("nan")
-        rows.append({"boundary": patch, "Fx_total": mean(P["total"], 0), "Fx_pressure": mean(P["pressure"], 0),
-                     "Fx_shear": mean(P["viscous"], 0), "Fz_total": mean(P["total"], 2)})
-    out["breakdown"] = rows
-    with open(os.path.join(case, "breakdown.txt"), "w") as fh:
-        fh.write("boundary, Fx_total, Fx_pressure, Fx_shear, Fz_total [N]\n")
-        for r in rows:
-            fh.write(f"{r['boundary']:<22s} {r['Fx_total']:10.3f} {r['Fx_pressure']:10.3f} "
-                     f"{r['Fx_shear']:10.3f} {r['Fz_total']:10.3f}\n")
-
-    # Wall y+ at the write times (yPlus function object, per patch)
-    yp = {}
-    for path in metrics.dat_files(case, "yPlus", "yPlus.dat"):
-        for line in open(path):
-            p = line.split()
-            if line.startswith("#") or len(p) < 5:
-                continue
-            yp.setdefault(float(p[0]), {})[p[1]] = (float(p[2]), float(p[3]), float(p[4]))
-    out["yplus_history"] = [{"t": tt, **{k: list(v) for k, v in d.items()}} for tt, d in sorted(yp.items())]
+        t, d = read_dat(case, f"forces_{patch}", "force.dat")
+        mean = flow["symmetry_factor"] * d[t >= t[-1] - ASYMPTOTE_WINDOW].mean(axis=0)
+        out["breakdown"].append({"boundary": patch, "Fx_total": mean[0], "Fx_pressure": mean[3],
+                                 "Fx_shear": mean[6], "Fz_total": mean[2]})
     return out
 
 # =====================================================================================================
 # Plots (the STAR-CCM+ monitor plots)
 # =====================================================================================================
 
-def plot_monitors(case, flow, hist, m):
-    try:
-        import matplotlib
-        matplotlib.use("Agg")
-        import matplotlib.pyplot as plt
-    except ImportError:
-        print("  matplotlib not available, no plots")
-        return
-    out = os.path.join(case, "plots")
-    os.makedirs(out, exist_ok=True)
-    half = flow["half_model"]
+PLOTS = [   # (title, series, y label); series missing from the histories (half model) are skipped
+    ("CD", ["CD"], "CD"), ("CL", ["CL"], "CL"), ("CY", ["CY"], "CY"),
+    ("Cm (pitch)", ["Cm_pitch"], "Cm about CG"), ("Cl (roll)", ["Cl_roll"], "Cl"),
+    ("Cn (yaw)", ["Cn_yaw"], "Cn"), ("L over D", ["L_over_D"], "L/D"),
+    ("CX net with engine", ["CX_net_with_engine"], "CX net"),
+    ("Forces - lift drag side [N]", ["Lift", "Drag", "SideForce"], "Force [N]"),
+    ("Force - net axial with engine [N]", ["Fx_body", "Fx_net_with_engine"], "Force [N]"),
+    ("Inlet pressure recovery", ["PressureRecovery_engine_face"], "p0 / p0_inf"),
+    ("Engine face Mach", ["Mach_engine_face"], "Mach"),
+    ("Engine face static pressure [Pa]", ["p_engine_face"], "p [Pa]"),
+]
 
-    plots = [
-        ("CD", ["CD"], "CD"), ("CL", ["CL"], "CL"), ("CY", ["CY"], "CY"),
-        ("Cm (pitch)", ["Cm_pitch"], "Cm about CG"), ("Cl (roll)", ["Cl_roll"], "Cl"),
-        ("Cn (yaw)", ["Cn_yaw"], "Cn"), ("L over D", ["L_over_D"], "L/D"),
-        ("CX net with engine", ["CX_net_with_engine"], "CX net"),
-        ("Forces - lift drag side [N]", ["Lift", "Drag", "SideForce"], "Force [N]"),
-        ("Force - net axial with engine [N]", ["Fx_body", "Fx_net_with_engine"], "Force [N]"),
-        ("Engine mass flows [kg per s]", ["mdot_engine_face", "mdot_exhaust"], "Mass flow [kg/s]"),
-        ("Inlet pressure recovery", ["PressureRecovery_engine_face"], "p0 / p0_inf"),
-        ("Engine face Mach", ["Mach_engine_face"], "Mach"),
-        ("Engine face static pressure [Pa]", ["p_engine_face"], "p [Pa]"),
-    ]
-    if half:   # zero by symmetry
-        plots = [p for p in plots if p[1][0] not in ("CY", "Cl_roll", "Cn_yaw")]
-
-    for title, names, ylabel in plots:
+def plot_monitors(case, hist, m):
+    import matplotlib
+    matplotlib.use("Agg")
+    import matplotlib.pyplot as plt
+    os.makedirs(os.path.join(case, "plots"), exist_ok=True)
+    t = hist["t"]
+    window = t >= t[-1] - ASYMPTOTE_WINDOW
+    for title, names, ylabel in PLOTS:
         names = [n for n in names if n in hist]
         if not names:
             continue
         fig, ax = plt.subplots(figsize=(9, 5))
-        tails = []
         for n in names:
-            t, y = hist[n]
-            ax.plot(t, y, linewidth=1.0, label=f"{n} = {m['reports'].get(n, float('nan')):.5g}")
-            tails.append(y[t >= t[-1] - ASYMPTOTE_WINDOW])
-        t_end = max(hist[n][0][-1] for n in names)
-        ax.axvspan(t_end - ASYMPTOTE_WINDOW, t_end, color="0.6", alpha=0.25,
+            ax.plot(t, hist[n], linewidth=1.0, label=f"{n} = {m['reports'][n]:.5g}")
+        ax.axvspan(t[-1] - ASYMPTOTE_WINDOW, t[-1], color="0.6", alpha=0.25,
                    label=f"final window ({ASYMPTOTE_WINDOW} iterations)")
-        for n in names:
-            if n in ASYMPTOTE:
-                s = m["stopping_criteria"].get(n, {})
-                ax.set_title(f"{title}   [band {s.get('width', float('nan')):.3g} / tol {ASYMPTOTE[n]:g}]")
-                break
-        else:
-            ax.set_title(title)
+        s = m["stopping_criteria"].get(names[0])
+        ax.set_title(f"{title}   [band {s['width']:.3g} / tol {s['tol']:g}]" if s else title)
         # y-range from the settled part, the start-up transient flattens everything else
-        lo = min(float(np.min(x)) for x in tails if len(x))
-        hi = max(float(np.max(x)) for x in tails if len(x))
+        lo = min(hist[n][window].min() for n in names)
+        hi = max(hist[n][window].max() for n in names)
         pad = max(8.0 * (hi - lo), 0.05 * max(abs(lo), abs(hi)), 1e-9)
         ax.set_ylim(lo - pad, hi + pad)
         ax.set_xlabel("Iteration")
         ax.set_ylabel(ylabel)
         ax.grid(True, linestyle="--", alpha=0.6)
         ax.legend(fontsize=8)
-        fig.savefig(os.path.join(out, "plot_" + re.sub(r"[^A-Za-z0-9_+-]", "_", title) + ".png"),
+        fig.savefig(os.path.join(case, "plots", "plot_" + re.sub(r"[^A-Za-z0-9_+-]", "_", title) + ".png"),
                     dpi=160, bbox_inches="tight")
         plt.close(fig)
 
-    # Wall y+ (write times only)
-    yh = m.get("yplus_history", [])
-    if yh:
-        fig, ax = plt.subplots(figsize=(9, 5))
-        t = [r["t"] for r in yh]
-        for patch in WALL_PATCHES:
-            if all(patch in r for r in yh):
-                ax.plot(t, [r[patch][1] for r in yh], "o-", label=f"{patch} max")
-                ax.plot(t, [r[patch][2] for r in yh], "s--", label=f"{patch} avg")
-        ax.set_xlabel("Iteration"); ax.set_ylabel("y+"); ax.set_title("Wall y+")
-        ax.grid(True, linestyle="--", alpha=0.6); ax.legend(fontsize=8)
-        fig.savefig(os.path.join(out, "plot_Wall_y_.png"), dpi=160, bbox_inches="tight")
-        plt.close(fig)
-
-
 def plot_residuals(case):
-    try:
-        import matplotlib
-        matplotlib.use("Agg")
-        import matplotlib.pyplot as plt
-    except ImportError:
-        return
-    res = {}
-    for path in metrics.dat_files(case, "residuals", "solverInfo.dat"):
-        lines = open(path).readlines()
-        header = next((l for l in lines if l.startswith("# Time")), None)
-        if header is None:
-            continue
-        cols = header.lstrip("#").split()
-        fields = {c[:-len("_initial")]: i for i, c in enumerate(cols) if c.endswith("_initial")}
-        fresh = set(fields)   # series not yet trimmed for this file
-        for line in lines:
-            p = line.split()
-            if line.startswith("#") or len(p) != len(cols):
-                continue
-            for name, i in fields.items():
-                tt, vv = res.setdefault(name, ([], []))
-                try:
-                    t, v = float(p[0]), float(p[i])
-                except ValueError:
-                    continue
-                if name in fresh:
-                    # A restart supersedes everything from its first time onward
-                    while tt and tt[-1] >= t:
-                        tt.pop(); vv.pop()
-                    fresh.discard(name)
-                elif tt and t <= tt[-1]:
-                    continue
-                tt.append(t); vv.append(v)
-    if not res:
-        return
+    import matplotlib
+    matplotlib.use("Agg")
+    import matplotlib.pyplot as plt
+    with open(os.path.join(case, "postProcessing", "residuals", "0", "solverInfo.dat")) as fh:
+        lines = fh.read().splitlines()
+    cols = next(l for l in lines if l.startswith("# Time"))[1:].split()
+    rows = [l.split() for l in lines if not l.startswith("#") and len(l.split()) == len(cols)]
+    t = [float(r[0]) for r in rows]
+    num = lambda s: float(s) if re.fullmatch(r"[-+0-9.eE]+", s) else float("nan")
     fig, ax = plt.subplots(figsize=(9, 5))
-    for name, (tt, vv) in sorted(res.items()):
-        ax.semilogy(tt, vv, linewidth=0.8, label=name)
+    for i, c in enumerate(cols):
+        if c.endswith("_initial"):
+            ax.semilogy(t, [num(r[i]) for r in rows], linewidth=0.8, label=c[:-len("_initial")])
     ax.set_xlabel("Iteration"); ax.set_ylabel("Initial residual"); ax.set_title("Residuals")
     ax.grid(True, which="both", linestyle="--", alpha=0.5); ax.legend()
-    os.makedirs(os.path.join(case, "plots"), exist_ok=True)
     fig.savefig(os.path.join(case, "plots", "residuals.png"), dpi=160, bbox_inches="tight")
     plt.close(fig)
 
@@ -1080,15 +763,12 @@ def plot_residuals(case):
 # =====================================================================================================
 
 def post_process(case):
-    name = os.path.basename(os.path.normpath(case))
     log = os.path.join(case, "log.pvbatch")
-    rc = sh(f"LIBGL_ALWAYS_SOFTWARE=1 pvbatch --force-offscreen-rendering {os.path.join(HERE, 'detail_post.py')} "
-            f"{os.path.join(case, name + '.foam')} {os.path.join(case, 'images')} > {log} 2>&1")
-    if rc != 0:
+    foam = os.path.join(case, os.path.basename(case) + ".foam")
+    if sh(f"LIBGL_ALWAYS_SOFTWARE=1 pvbatch --force-offscreen-rendering {os.path.join(HERE, 'detail_post.py')} "
+          f"{foam} {os.path.join(case, 'images')} > {log} 2>&1") != 0:
         print(f"  post processing failed, last lines of {log}:")
         sh(f"tail -n 30 {log}")
-    return rc == 0
-
 
 def read_json(case):
     try:
@@ -1097,59 +777,47 @@ def read_json(case):
     except (OSError, ValueError):
         return {}
 
-
 def write_json(case, data):
     os.makedirs(case, exist_ok=True)
     with open(os.path.join(case, "metrics.json"), "w") as fh:
         json.dump(data, fh, indent=2)
 
-
 def format_summary(m):
-    f = m.get("flow", {})
-    rep, std = m.get("reports", {}), m.get("report_std", {})
+    f, rep, std = m["flow"], m["reports"], m["report_std"]
     bar = "=" * 72
     lines = [
         "", bar,
-        f" {os.path.basename(m.get('case', ''))}   Mach {f.get('mach')} | alpha {f.get('alpha_deg')} | "
-        f"beta {f.get('beta_deg')} | CG {f.get('cg')} | {'half' if f.get('half_model') else 'full'} model",
+        f" {os.path.basename(m['case'])}   Mach {f['mach']} | alpha {f['alpha_deg']} | beta {f['beta_deg']} | "
+        f"CG {f['cg']} | {'half' if f['half_model'] else 'full'} model",
         bar,
-        f"  stopped by {m.get('stop_reason', '?')} at iteration {m.get('iterations', float('nan')):.0f}, "
-        f"solve time {m.get('solve_time_s', float('nan')):.0f} s, "
-        f"{m.get('mesh', {}).get('mesh_cells', '?')} cells",
-        f"  initial field: {m.get('init_from') or 'uniform freestream'}",
+        f"  stopped by {m['stop_reason']} at iteration {m['iterations']}, solve time {m['solve_time_s']:.0f} s, "
+        f"{m['mesh'].get('mesh_cells', '?')} cells",
+        f"  initial field: {m['init_from'] or 'uniform freestream'}",
         "", "== Stopping criteria (band over the final window) ==",
     ]
-    for k, s in m.get("stopping_criteria", {}).items():
+    for k, s in m["stopping_criteria"].items():
         lines.append(f"  {k + ' asymptote':<34s} band {s['width']:12.4g}  tol {s['tol']:10.4g}  "
                      f"satisfied={s['ok']}")
-    lines.append(f"  CD drift over the last {100 * metrics.TAIL_FRACTION:.0f}%: "
-                 f"{m.get('CD_drift_pct') if m.get('CD_drift_pct') is None else round(m['CD_drift_pct'], 4)} %")
     lines += ["", f"== Reports (mean over the final {ASYMPTOTE_WINDOW} iterations, +/- std) =="]
-    for k in REPORT_ORDER:
-        if k in rep:
-            lines.append(f"  {k:<32s} {rep[k]:14.6g}   +/- {std.get(k, 0):.3g}")
+    lines += [f"  {k:<32s} {rep[k]:14.6g}   +/- {std[k]:.3g}" for k in rep]
     lines += ["", "== Axial force breakdown (complete aircraft) [N] ==",
               f"  {'boundary':<14s} {'Fx_total':>10s} {'Fx_press':>10s} {'Fx_shear':>10s} {'Fz_total':>10s}"]
-    for r in m.get("breakdown", []):
-        lines.append(f"  {r['boundary']:<14s} {r['Fx_total']:10.3f} {r['Fx_pressure']:10.3f} "
-                     f"{r['Fx_shear']:10.3f} {r['Fz_total']:10.3f}")
-    post = m.get("post", {})
+    lines += [f"  {r['boundary']:<14s} {r['Fx_total']:10.3f} {r['Fx_pressure']:10.3f} "
+              f"{r['Fx_shear']:10.3f} {r['Fz_total']:10.3f}" for r in m["breakdown"]]
+    post = m.get("post")
     if post:
         lines += ["", "== Wall y+ (latest time) =="]
-        for k, v in post.get("yplus", {}).items():
-            lines.append(f"  {k:<14s} area avg {v['avg']:8.2f}   max {v['max']:9.2f}")
+        lines += [f"  {k:<14s} area avg {v['avg']:8.2f}   max {v['max']:9.2f}" for k, v in post["yplus"].items()]
         lines += ["", "== Field extremes (fluid volume) =="]
-        for k, (lo, hi) in post.get("field_range", {}).items():
-            lines.append(f"  {k:<26s} min {lo:14.6g}   max {hi:14.6g}")
+        lines += [f"  {k:<26s} min {lo:14.6g}   max {hi:14.6g}" for k, (lo, hi) in post["field_range"].items()]
         lp = post.get("low_pressure_cells")
         if lp:
+            b = lp["bounds"]
             lines += ["", f"== Cells with p < {lp['limit']:g} Pa: {lp['count']} ==",
-                      f"  bounds x {lp['bounds'][0]:.4f} .. {lp['bounds'][1]:.4f}, y {lp['bounds'][2]:.4f} .. "
-                      f"{lp['bounds'][3]:.4f}, z {lp['bounds'][4]:.4f} .. {lp['bounds'][5]:.4f} m"
+                      f"  bounds x {b[0]:.4f} .. {b[1]:.4f}, y {b[2]:.4f} .. {b[3]:.4f}, z {b[4]:.4f} .. {b[5]:.4f} m"
                       if lp["count"] else "  none"]
-    lines += [bar, f"  CONVERGED (asymptotic criteria): {m.get('converged')}", bar, ""]
+    lines += [bar, f"  CONVERGED (stopping criteria): {m['converged']}", bar, ""]
     return "\n".join(lines)
-
 
 if __name__ == "__main__":
     sys.exit(main())

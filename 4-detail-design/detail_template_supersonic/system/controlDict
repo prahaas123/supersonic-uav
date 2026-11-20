@@ -107,8 +107,8 @@ functions
         writeControl    writeTime;
     }
 
-    // ---------------- engine face ----------------
-    mdot_engine_face
+    // ---------------- engine face and exhaust (mass flows are imposed, so not monitored) ----------------
+    engine_face_average
     {
         type            surfaceFieldValue;
         libs            (fieldFunctionObjects);
@@ -118,18 +118,12 @@ functions
         writeFields     false;
         regionType      patch;
         name            engine_face;
-        operation       sum;
-        fields          (phi);
-    }
-    engine_face_average
-    {
-        $mdot_engine_face;
         operation       areaAverage;
         fields          (p Ma T);
     }
     engine_face_p0
     {
-        $mdot_engine_face;
+        $engine_face_average;
         operation       weightedAverage;
         weightField     phi;
         fields          (p0);
@@ -137,30 +131,15 @@ functions
     // sum(phi U): momentum flux out of the domain (signed weights)
     engine_face_momentum
     {
-        $mdot_engine_face;
+        $engine_face_average;
         operation       weightedSum;
         weightField     phi;
         fields          (U);
-    }
-
-    // ---------------- exhaust ----------------
-    mdot_exhaust
-    {
-        $mdot_engine_face;
-        name            exhaust;
-    }
-    exhaust_average
-    {
-        $mdot_exhaust;
-        operation       areaAverage;
-        fields          (p Ma T);
     }
     exhaust_momentum
     {
-        $mdot_exhaust;
-        operation       weightedSum;
-        weightField     phi;
-        fields          (U);
+        $engine_face_momentum;
+        name            exhaust;
     }
 
     // ---------------- fields for post processing (write times only) ----------------
