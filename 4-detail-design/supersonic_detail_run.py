@@ -56,6 +56,14 @@ RAMP_ITERS      = 1500           # back pressure ramps down to P_BACK over these
 P_START_FRAC    = 0.2            # ... from p0_face - P_START_FRAC * (p0_face - P_BACK)
 MDOT_TARGET_TOL_PCT = 0.5        # engine-face mass flow vs MDOT_AIR, reported only (it is a result)
 
+# --- duct start. On a freestream start the inlet duct and the extension are filled with gas at rest at the
+#     starting back pressure (p_back_start, T0_inf), as in 3-inlet-design. A duct started at the supersonic
+#     freestream stayed supersonic against the back pressure (detail_M1.5_a0_b0, Nov 2026: engine-face
+#     Mach 1.18, p0 recovery 0.60, then a floating point exception at iteration 2519)
+DUCT_INIT         = True
+DUCT_INIT_X_START = None         # [m] upstream end of the filled region; None = 2 mm aft of the last point
+                                 # where the inlet duct meets the inlet lip or the airframe
+
 # --- walls
 WALL_TEMPERATURE = None          # None = adiabatic, a value [K] = isothermal walls
 
@@ -139,7 +147,8 @@ WALL_PATCHES = ("airframe", "inlet_lip", "inlet_duct")   # vehicle walls; the ex
 
 def main():
     half = BETA_DEG == 0.0 if HALF_MODEL is None else bool(HALF_MODEL)
-    flow = flow_conditions(geometry_info(GEOMETRY), half)
+    geo = geometry_info(GEOMETRY)
+    flow = flow_conditions(geo, half)
     print_conditions(flow)
 
     # 1. Mesh, reused while the mesh settings and the geometry are unchanged
@@ -166,8 +175,9 @@ def main():
     src = find_init_source(case, mesh_dir)
     init_from = initialise_from(case, *src) if src else None
     write_outlet_pressure(case, flow, ramp=not init_from)
+    duct_init = initialise_duct(case, flow, geo["duct"]) if DUCT_INIT and not init_from else None
     write_json(case, {"case": os.path.abspath(case), "flow": flow, "mesh": read_json(mesh_dir),
-                      "init_from": init_from})
+                      "init_from": init_from, "duct_init": duct_init})
 
     # 3. Solve
     print("[2/4] Solving (rhoCentralFoam) ...")
@@ -331,7 +341,17 @@ def geometry_info(path):
     x_ef = float(np.asarray(verts["extension"], dtype=float)[:, 0].min())
     engine_face = {"x": x_ef, "centre": [x_ef, centre["outlet"][1], centre["outlet"][2]], "area": area["outlet"],
                    "radius": math.sqrt(area["outlet"] / math.pi), "x_outlet": centre["outlet"][0]}
-    return {"area": area, "normal": normal, "engine_face": engine_face}
+    # Duct start region: the inlet duct downstream of its last vertex shared with the inlet lip or the
+    # airframe (and of the whole lip), so the capture opening lies upstream of it and the duct walls,
+    # extension and outlet close it all round
+    pts = lambda name: np.asarray(verts[name], dtype=float)
+    keys = lambda a: {tuple(r) for r in np.round(a, 7)}
+    outer = keys(pts("inlet_lip")) | keys(pts("airframe"))
+    shared = [v for v in keys(pts("inlet_duct")) if v in outer]
+    walls = np.vstack([pts("inlet_duct"), pts("extension")])
+    duct = {"x_start": float(max([pts("inlet_lip")[:, 0].max()] + [v[0] for v in shared])),
+            "n_shared_vertices": len(shared), "lo": walls.min(axis=0).tolist(), "hi": walls.max(axis=0).tolist()}
+    return {"area": area, "normal": normal, "engine_face": engine_face, "duct": duct}
 
 # =====================================================================================================
 # Mesh
@@ -545,6 +565,48 @@ def write_outlet_pressure(case, f, ramp):
     write_text(os.path.join(case, "0", "include", "outletPressure"),
                "// Written by supersonic_detail_run.py: engine back pressure at the extension outlet\n"
                "type            uniformFixedValue;\n" + value + f"value           uniform {f['p_back']:.8g};\n")
+
+def initialise_duct(case, f, duct):
+    """Fill the inlet duct and the extension (freestream start) with gas at rest at the starting back pressure.
+    The cells are those of a box over the duct (from DUCT_INIT_X_START) connected to a point in the extension,
+    so the outer flow inside the box is left alone. Returns a description for metrics.json."""
+    x0 = DUCT_INIT_X_START if DUCT_INIT_X_START is not None else duct["x_start"] + 2e-3
+    x_ef, x_out, r, c = f["engine_face_x"], f["outlet_x"], f["engine_face_radius"], f["engine_face_centre"]
+    if not x0 < x_ef:
+        raise SystemExit(f"duct start region begins at x {x0:.4f} m, not upstream of the engine face "
+                         f"(x {x_ef:.4f} m); set DUCT_INIT_X_START")
+    m = 2e-3
+    lo = [x0, duct["lo"][1] - m, duct["lo"][2] - m]
+    hi = [x_out + m, duct["hi"][1] + m, duct["hi"][2] + m]
+    inside = [0.5 * (x_ef + x_out), c[1] + 0.3 * r, c[2] + 0.1 * r]   # in the extension, off the grid planes
+    p, T = f["p_back_start"], f["T0_inf"]
+    head = lambda obj: ("FoamFile\n{\n    version     2.0;\n    format      ascii;\n    class       dictionary;\n"
+                        f"    object      {obj};\n}}\n// Written by supersonic_detail_run.py: duct start region\n\n")
+    write_text(os.path.join(case, "system", "topoSetDict"), head("topoSetDict") +
+               "actions\n(\n"
+               f"    {{ name ductBox;  type cellSet; action new; source boxToCell; box {fmt_vec(lo)} {fmt_vec(hi)}; }}\n"
+               "    { name ductInit; type cellSet; action new; source regionToCell; set ductBox;\n"
+               f"      insidePoints ({fmt_vec(inside)}); nErode 0; }}\n);\n")
+    write_text(os.path.join(case, "system", "setFieldsDict"), head("setFieldsDict") +
+               "defaultFieldValues ( );\n\nregions\n(\n    cellToCell\n    {\n        set ductInit;\n"
+               "        fieldValues\n        (\n"
+               "            volVectorFieldValue U (0 0 0)\n"
+               f"            volScalarFieldValue p {p:.8g}\n"
+               f"            volScalarFieldValue T {T:.8g}\n"
+               "        );\n    }\n);\n")
+    print(f"  duct start: x {x0:.4f} .. {x_out:.4f} m at rest, p {p:.0f} Pa, T {T:.1f} K "
+          f"({duct['n_shared_vertices']} lip / airframe vertices on the duct)")
+    if not run_steps(case, [("topoSet", f"topoSet -case {case}")]):
+        raise SystemExit("topoSet failed for the duct start region (DUCT_INIT = False starts from the freestream)")
+    sizes = dict(re.findall(r"cellSet (\w+) now size (\d+)", open(os.path.join(case, "log.topoSet")).read()))
+    n_box, n_duct = int(sizes.get("ductBox", 0)), int(sizes.get("ductInit", 0))
+    if n_duct == 0:
+        raise SystemExit(f"no duct cells found around {fmt_vec(inside)} (log.topoSet)")
+    if not run_steps(case, [("setFields", f"setFields -case {case}")]):
+        raise SystemExit("setFields failed for the duct start region")
+    print(f"  duct start: {n_duct} cells set ({n_box} in the box, the rest is outer flow)")
+    return {"x_start": x0, "box": [lo, hi], "inside_point": inside, "cells": n_duct, "box_cells": n_box,
+            "p": p, "T": T}
 
 def latest_time(case):
     times = [d for d in os.listdir(case) if re.fullmatch(r"[0-9.eE+-]+", d) and float(d) > 0]
@@ -855,7 +917,9 @@ def format_summary(m):
         bar,
         f"  stopped by {m['stop_reason']} at iteration {m['iterations']}, solve time {m['solve_time_s']:.0f} s, "
         f"{m['mesh'].get('mesh_cells', '?')} cells",
-        f"  initial field: {m['init_from'] or 'uniform freestream'}",
+        f"  initial field: {m['init_from'] or 'uniform freestream'}"
+        + (f", duct from x {m['duct_init']['x_start']:.4f} m at rest ({m['duct_init']['cells']} cells)"
+           if m.get("duct_init") else ""),
         "", "== Stopping criteria (band over the final window) ==",
     ]
     for k, s in m["stopping_criteria"].items():
