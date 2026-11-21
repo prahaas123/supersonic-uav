@@ -6,3 +6,5 @@ archive
 *pycache*
 5-paper/
 *.stl
+4-detail-design/images*
+4-detail-design/plots*
