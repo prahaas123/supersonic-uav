@@ -512,7 +512,8 @@ def prepare_case(case, mesh_dir, f):
     v = lambda x: f"{x:.8g}"
     sym = f["symmetry_factor"]
     r = f["engine_face_radius"]
-    ef_box = (1e-3, 1.1 * r, 1.1 * r)       # half sizes of the box that bounds the engine-face plane
+    # half sizes of the box that bounds the engine-face plane. The bounds keep the cut cells whose centres lie inside, so the x half size must exceed half the largest duct cell: at 1 mm only a near-wall ring of the finer cells was sampled (25 % of the face area, detail_M1.5_a0_b0, Nov 2026)
+    ef_box = (0.5 * r, 1.1 * r, 1.1 * r)
     write_text(path("0", "include", "flowVars"), "\n".join([
         "// Written by supersonic_detail_run.py",
         f"Uinf            {fmt_vec(f['U_vec'])};",
