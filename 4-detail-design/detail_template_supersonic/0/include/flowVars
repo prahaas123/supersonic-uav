@@ -10,8 +10,7 @@ omegaInf        40160.6;
 nutInf          0.000731586;
 Prt             0.9;
 
-// Engine face (pressure-free outlet at the target air mass flow)
-mdotEngineFace  0.13175;
+// Extension outlet backflow (back pressure: include/outletPressure)
 T0inf           314.143;
 
 // Exhaust (supersonic mass-flow inlet)

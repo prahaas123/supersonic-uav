@@ -31,18 +31,17 @@ boundaryField
     {
         type            symmetry;
     }
-    "(airframe|inlet_lip|inlet_duct)"
+    "(airframe|inlet_lip|inlet_duct|extension)"
     {
         type            noSlip;
     }
-    // Engine face: flow leaves the domain at the target air mass flow, static pressure is a result
-    engine_face
+    // Outlet of the straight extension after the engine face: velocity follows from the fixed back
+    // pressure, zero velocity on any backflow face (as 3-inlet-design/case_template_inlet)
+    outlet
     {
-        type            flowRateOutletVelocity;
-        massFlowRate    $mdotEngineFace;
-        rho             rho;
-        rhoOutlet       $rhoInf;
-        value           uniform $Uinf;
+        type            inletOutlet;
+        inletValue      uniform (0 0 0);
+        value           uniform (0 0 0);
     }
     // RDE exhaust: mass-flow inlet normal to the base (air + fuel)
     exhaust

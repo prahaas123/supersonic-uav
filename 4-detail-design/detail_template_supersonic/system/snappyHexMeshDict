@@ -37,7 +37,8 @@ geometry
             airframe    { name airframe; }
             inlet_lip   { name inlet_lip; }
             inlet_duct  { name inlet_duct; }
-            engine_face { name engine_face; }
+            extension   { name extension; }
+            outlet      { name outlet; }
             exhaust     { name exhaust; }
         }
     }
@@ -72,7 +73,8 @@ castellatedMeshControls
                 airframe    { level $airframeLevel;    patchInfo { type wall; } }
                 inlet_lip   { level $inletLipLevel;    patchInfo { type wall; } }
                 inlet_duct  { level $inletDuctLevel;   patchInfo { type wall; } }
-                engine_face { level $enginePortsLevel; patchInfo { type patch; } }
+                extension   { level $inletDuctLevel;   patchInfo { type wall; } }
+                outlet      { level $enginePortsLevel; patchInfo { type patch; } }
                 exhaust     { level $enginePortsLevel; patchInfo { type patch; } }
             }
         }
@@ -113,7 +115,7 @@ addLayersControls
         {
             nSurfaceLayers      $nLayers;
         }
-        inlet_duct
+        "(inlet_duct|extension)"
         {
             nSurfaceLayers      $nLayersDuct;
         }

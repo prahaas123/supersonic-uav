@@ -32,13 +32,15 @@ boundaryField
     {
         type            symmetry;
     }
-    "(airframe|inlet_lip|inlet_duct)"
+    "(airframe|inlet_lip|inlet_duct|extension)"
     {
         type            zeroGradient;
     }
-    engine_face
+    // Engine back pressure, 1D estimate at the target mass flow with an assumed recovery (PT_RECOVERY_EST),
+    // ramped down on a freestream start. The engine-face mass flow is a result.
+    outlet
     {
-        type            zeroGradient;
+        #include        "include/outletPressure"
     }
     exhaust
     {

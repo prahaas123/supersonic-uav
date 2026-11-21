@@ -39,12 +39,22 @@ C_REF = 0.503                    # exposed-wing mean chord [m]
 B_REF = 1.107                    # span [m]
 
 # --- engine (README section 1)
-MDOT_AIR   = 0.2635              # engine-face air mass flow [kg/s]
+MDOT_AIR   = 0.2635              # engine-face air mass flow target [kg/s] (a result, set by the back pressure)
 MDOT_FUEL  = 0.0216              # [kg/s], exhaust mass flow = MDOT_AIR + MDOT_FUEL
 T0_EXHAUST = 2250.0              # exhaust total temperature [K] (assumed)
 P_EXHAUST  = 15065.0             # exhaust static pressure [Pa] (from the 343.75 N thrust estimate)
 EXHAUST_TURB_INTENSITY = 0.01
 EXHAUST_VISC_RATIO     = 10.0
+
+# --- engine-face back pressure. A straight extension of the engine-face section (1.5 D, in the CAD) ends in
+#     the outlet patch, which holds a fixed static pressure; the engine-face quantities, mass flow included,
+#     are results sampled on the engine-face plane (as 3-inlet-design/run_inlet.py)
+PT_RECOVERY_EST = 0.94 * 0.979   # engine-face p0 / p0_inf assumed for the 1D back pressure: 2D external
+                                 # compression x S-duct recovery of design 39 (0-results/inlet_dse_results.csv)
+P_BACK          = None           # [Pa] outlet static pressure; None = 1D value at MDOT_AIR with PT_RECOVERY_EST
+RAMP_ITERS      = 1500           # back pressure ramps down to P_BACK over these iterations (freestream start) ...
+P_START_FRAC    = 0.2            # ... from p0_face - P_START_FRAC * (p0_face - P_BACK)
+MDOT_TARGET_TOL_PCT = 0.5        # engine-face mass flow vs MDOT_AIR, reported only (it is a result)
 
 # --- walls
 WALL_TEMPERATURE = None          # None = adiabatic, a value [K] = isothermal walls
@@ -52,7 +62,8 @@ WALL_TEMPERATURE = None          # None = adiabatic, a value [K] = isothermal wa
 # =====================================================================================================
 # GEOMETRY AND MESH (the mesh does not depend on the flow condition and is reused between runs)
 # =====================================================================================================
-GEOMETRY   = os.path.join(HERE, "uav.stl")     # ASCII, one solid per named face, metres
+GEOMETRY   = os.path.join(HERE, "uav.stl")     # ASCII, one solid per named face (GEOMETRY_SOLIDS), metres
+GEOMETRY_SOLIDS = ("airframe", "inlet_lip", "inlet_duct", "extension", "outlet", "exhaust")
 HALF_MODEL = None                # None: half model (symmetry plane y = 0) when BETA_DEG == 0, else full
 DOMAIN     = {"x": (-2.4, 10.0), "y": (-4.5, 4.5), "z": (-3.6, 4.8)}   # extended to whole BASE_SIZE cells
 BASE_SIZE  = 0.4                 # background (largest) cell [m]; all sizes below are BASE_SIZE / 2^n
@@ -61,8 +72,8 @@ BASE_SIZE  = 0.4                 # background (largest) cell [m]; all sizes belo
 SURFACE_SIZES = {
     "airframe":     (0.003125,  0.0015625),   # STAR-CCM+ 6.25 / 1.5625 mm
     "inlet_lip":    (0.000390625, 0.000390625),  # STAR-CCM+ 0.5 / 0.25 mm, nearest BASE_SIZE / 2^n
-    "inlet_duct":   (0.0015625, 0.00078125),
-    "engine_ports": (0.0015625, 0.00078125),  # engine face + exhaust
+    "inlet_duct":   (0.0015625, 0.00078125),  # also the extension
+    "engine_ports": (0.0015625, 0.00078125),  # outlet + exhaust
 }
 FEATURE_EDGE_SIZE = 0.0015625    # cell size along sharp CAD edges [m]
 N_CELLS_BETWEEN_LEVELS = 3
@@ -114,13 +125,13 @@ ASYMPTOTE = {
     "CD":            1.0e-4,     # 1 drag count
     "CL":            5.0e-4,
     "Cm_pitch":      5.0e-4,
-    "p_engine_face": 50.0,       # [Pa], the free variable at the engine face (mass flow is imposed)
+    "mdot_engine_face": 1.0e-3,  # [kg/s] complete aircraft, the free variable (back pressure is imposed)
 }
 ASYMPTOTE_WINDOW        = 2000  # [iterations]
 ASYMPTOTE_MIN_ITER      = 6000  # no check before this iteration
 ASYMPTOTE_MIN_ITER_INIT = 3000  # the same, for a case started from another case (INIT_FROM)
 
-WALL_PATCHES = ("airframe", "inlet_lip", "inlet_duct")
+WALL_PATCHES = ("airframe", "inlet_lip", "inlet_duct")   # vehicle walls; the extension wall is the engine's
 
 # =====================================================================================================
 # Driver
@@ -153,8 +164,10 @@ def main():
     print("[1/4] Copying the mesh and writing the flow condition ...")
     prepare_case(case, mesh_dir, flow)
     src = find_init_source(case, mesh_dir)
+    init_from = initialise_from(case, *src) if src else None
+    write_outlet_pressure(case, flow, ramp=not init_from)
     write_json(case, {"case": os.path.abspath(case), "flow": flow, "mesh": read_json(mesh_dir),
-                      "init_from": initialise_from(case, *src) if src else None})
+                      "init_from": init_from})
 
     # 3. Solve
     print("[2/4] Solving (rhoCentralFoam) ...")
@@ -207,6 +220,18 @@ def exhaust_mach(mdot, area, p, T0):
         lo, hi = (mid, hi) if f(mid) < mdot / area else (lo, mid)
     return 0.5 * (lo + hi)
 
+def subsonic_mach(mdot, area, p0, T0):
+    # Subsonic Mach number of a mass flow through a section (bisection); None above the choked mass flow
+    flux = lambda M: (p0 * math.sqrt(GAMMA / (R_GAS * T0)) * M
+                      * (1.0 + 0.5 * (GAMMA - 1.0) * M * M) ** (-0.5 * (GAMMA + 1.0) / (GAMMA - 1.0)))
+    if mdot / area >= flux(1.0):
+        return None
+    lo, hi = 0.0, 1.0
+    for _ in range(100):
+        mid = 0.5 * (lo + hi)
+        lo, hi = (mid, hi) if flux(mid) < mdot / area else (lo, mid)
+    return 0.5 * (lo + hi)
+
 def turbulence(U, rho, T, intensity, visc_ratio):
     # (k, omega, nut) from a turbulence intensity and a viscosity ratio
     k = 1.5 * (intensity * U) ** 2
@@ -229,16 +254,27 @@ def flow_conditions(geo, half):
     rho_ex = P_EXHAUST / (R_GAS * T_ex)
     k_ex, omega_ex, _ = turbulence(U_ex, rho_ex, T_ex, EXHAUST_TURB_INTENSITY, EXHAUST_VISC_RATIO)
 
+    # 1D engine face at the target mass flow with the assumed recovery -> outlet back pressure
+    p0_inf, T0_inf = p * iso ** (GAMMA / (GAMMA - 1.0)), T * iso
+    ef = geo["engine_face"]
+    p0_ef = PT_RECOVERY_EST * p0_inf
+    M_ef = subsonic_mach(MDOT_AIR, ef["area"], p0_ef, T0_inf)
+    if M_ef is None:
+        raise SystemExit("MDOT_AIR is above the choked mass flow of the engine face with PT_RECOVERY_EST")
+    p_back = P_BACK or p0_ef / (1.0 + 0.5 * (GAMMA - 1.0) * M_ef ** 2) ** (GAMMA / (GAMMA - 1.0))
+
     return dict(
         mach=MACH, alpha_deg=ALPHA_DEG, beta_deg=BETA_DEG, cg=list(CG), altitude_m=ALTITUDE_M,
         half_model=half, symmetry_factor=2.0 if half else 1.0, gamma=GAMMA, R=R_GAS,
         sutherland_As=SUTHERLAND_AS, sutherland_Ts=SUTHERLAND_TS,
         p_inf=p, T_inf=T, rho_inf=rho, V_inf=U,
         U_vec=[U * math.cos(a) * math.cos(b), -U * math.sin(b), U * math.sin(a) * math.cos(b)],
-        q_inf=0.5 * GAMMA * p * MACH ** 2, p0_inf=p * iso ** (GAMMA / (GAMMA - 1.0)), T0_inf=T * iso,
+        q_inf=0.5 * GAMMA * p * MACH ** 2, p0_inf=p0_inf, T0_inf=T0_inf,
         k_inf=k, omega_inf=omega, nut_inf=nut,
         mdot_air=MDOT_AIR, mdot_exhaust=mdot_ex, T0_exhaust=T0_EXHAUST, p_exhaust=P_EXHAUST,
-        engine_face_area=geo["area"]["engine_face"],
+        engine_face_area=ef["area"], engine_face_x=ef["x"], engine_face_centre=ef["centre"],
+        engine_face_radius=ef["radius"], pt_recovery_est=PT_RECOVERY_EST, mach_engine_face_1d=M_ef,
+        p_back=p_back, p_back_start=p0_ef - P_START_FRAC * (p0_ef - p_back), ramp_iters=RAMP_ITERS,
         exhaust_mach_1d=M_ex, exhaust_T_1d=T_ex, exhaust_U_1d=U_ex, exhaust_rho_1d=rho_ex,
         exhaust_supersonic=M_ex >= 1.0, exhaust_U_vec=[U_ex * c for c in geo["normal"]["exhaust"]],
         exhaust_thrust_1d=mdot_ex * U_ex + (P_EXHAUST - p) * geo["area"]["exhaust"],
@@ -250,8 +286,10 @@ def print_conditions(f):
           f"CG ({', '.join(f'{c:g}' for c in f['cg'])}) m | {'half' if f['half_model'] else 'full'} model")
     print(f"  {f['altitude_m'] / 1000:g} km ISA: p {f['p_inf']:.1f} Pa, T {f['T_inf']:.2f} K, "
           f"rho {f['rho_inf']:.5f} kg/m3, V {f['V_inf']:.1f} m/s, q {f['q_inf']:.0f} Pa, p0 {f['p0_inf']:.0f} Pa")
-    print(f"  engine face {f['mdot_air']:g} kg/s over {f['engine_face_area'] * 1e4:.2f} cm2 | exhaust "
-          f"{f['mdot_exhaust']:g} kg/s, T0 {f['T0_exhaust']:g} K, p {f['p_exhaust']:g} Pa -> 1D Mach "
+    print(f"  engine face x {f['engine_face_x']:.4f} m, {f['engine_face_area'] * 1e4:.2f} cm2 | outlet back pressure "
+          f"{f['p_back']:.0f} Pa (1D: {f['mdot_air']:g} kg/s, Mach {f['mach_engine_face_1d']:.3f} with recovery "
+          f"{f['pt_recovery_est']:.4f})")
+    print(f"  exhaust {f['mdot_exhaust']:g} kg/s, T0 {f['T0_exhaust']:g} K, p {f['p_exhaust']:g} Pa -> 1D Mach "
           f"{f['exhaust_mach_1d']:.3f}, U {f['exhaust_U_1d']:.0f} m/s, gross thrust {f['exhaust_thrust_1d']:.1f} N")
     if not f["exhaust_supersonic"]:
         print("  WARNING: the 1D exhaust is subsonic, its static pressure is left free (zeroGradient)")
@@ -274,17 +312,25 @@ def geometry_info(path):
                 name = w[1] if len(w) > 1 else "solid"
             elif w and w[0] == "vertex":
                 verts.setdefault(name, []).append(w[1:4])
-    for need in ("airframe", "inlet_lip", "inlet_duct", "engine_face", "exhaust"):
+    for need in GEOMETRY_SOLIDS:
         if need not in verts:
             raise SystemExit(f"{path} has no 'solid {need}' (found: {', '.join(verts)})")
-    area, normal = {}, {}
+    area, normal, centre = {}, {}, {}
     for name, v in verts.items():
         p = np.asarray(v, dtype=float).reshape(-1, 3, 3)
         n = 0.5 * np.cross(p[:, 1] - p[:, 0], p[:, 2] - p[:, 0])
         s = n.sum(axis=0)
-        area[name] = float(np.linalg.norm(n, axis=1).sum())
+        a = np.linalg.norm(n, axis=1)
+        area[name] = float(a.sum())
         normal[name] = list(s / np.linalg.norm(s)) if np.linalg.norm(s) > 0 else [0.0, 0.0, 0.0]
-    return {"area": area, "normal": normal}
+        centre[name] = [float(c) for c in (a[:, None] * p.mean(axis=1)).sum(axis=0) / a.sum()]
+    # Engine face: the upstream end of the straight extension (along x), the same section as the outlet
+    if abs(normal["outlet"][0]) < 0.999:
+        raise SystemExit(f"{path}: the outlet must be a plane normal to x (normal {normal['outlet']})")
+    x_ef = float(np.asarray(verts["extension"], dtype=float)[:, 0].min())
+    engine_face = {"x": x_ef, "centre": [x_ef, centre["outlet"][1], centre["outlet"][2]], "area": area["outlet"],
+                   "radius": math.sqrt(area["outlet"] / math.pi)}
+    return {"area": area, "normal": normal, "engine_face": engine_face}
 
 # =====================================================================================================
 # Mesh
@@ -444,6 +490,8 @@ def prepare_case(case, mesh_dir, f):
     path = lambda *p: os.path.join(case, *p)
     v = lambda x: f"{x:.8g}"
     sym = f["symmetry_factor"]
+    r = f["engine_face_radius"]
+    ef_box = (1e-3, 1.1 * r, 1.1 * r)       # half sizes of the box that bounds the engine-face plane
     write_text(path("0", "include", "flowVars"), "\n".join([
         "// Written by supersonic_detail_run.py",
         f"Uinf            {fmt_vec(f['U_vec'])};",
@@ -454,7 +502,6 @@ def prepare_case(case, mesh_dir, f):
         f"omegaInf        {v(f['omega_inf'])};",
         f"nutInf          {v(f['nut_inf'])};",
         f"Prt             {v(PRANDTL_TURB)};",
-        f"mdotEngineFace  {v(f['mdot_air'] / sym)};      // per simulated model (half or full)",
         f"T0inf           {v(f['T0_inf'])};",
         f"mdotExhaust     {v(f['mdot_exhaust'] / sym)};",
         f"T0Exhaust       {v(f['T0_exhaust'])};",
@@ -483,8 +530,20 @@ def prepare_case(case, mesh_dir, f):
         f"maxCourant      {v(MAX_COURANT)};",
         f"monitorInterval {MONITOR_INTERVAL};",
         f"cg              {fmt_vec(CG)};",
-        f"rhoInfRef       {v(f['rho_inf'])};", ""]))
+        f"rhoInfRef       {v(f['rho_inf'])};",
+        # engine-face sampling plane, bounded to the duct section (the plane also cuts the outer flow)
+        f"efPoint         {fmt_vec(f['engine_face_centre'])};",
+        f"efBounds        {fmt_vec([c - d for c, d in zip(f['engine_face_centre'], ef_box)])} "
+        f"{fmt_vec([c + d for c, d in zip(f['engine_face_centre'], ef_box)])};", ""]))
     sub(path("system", "decomposeParDict"), r"^numberOfSubdomains\s+\d+;", f"numberOfSubdomains  {NP};")
+
+def write_outlet_pressure(case, f, ramp):
+    """Outlet back pressure: ramped down from p_back_start on a freestream start, constant otherwise."""
+    value = (f"uniformValue    table ((0 {f['p_back_start']:.8g}) ({f['ramp_iters']} {f['p_back']:.8g}));\n"
+             if ramp else f"uniformValue    constant {f['p_back']:.8g};\n")
+    write_text(os.path.join(case, "0", "include", "outletPressure"),
+               "// Written by supersonic_detail_run.py: engine back pressure at the extension outlet\n"
+               "type            uniformFixedValue;\n" + value + f"value           uniform {f['p_back']:.8g};\n")
 
 def latest_time(case):
     times = [d for d in os.listdir(case) if re.fullmatch(r"[0-9.eE+-]+", d) and float(d) > 0]
@@ -652,7 +711,9 @@ def histories(case, f):
         h.update(Fy_body=Fy, Mx_cg=Mx, Mz_cg=Mz, SideForce=side, CY=side / qS,
                  Cl_roll=-Mx / (qS * B_REF), Cn_yaw=-Mz / (qS * B_REF))
 
+    # engine face: the sampling plane at the upstream end of the extension (normal +x)
     sfv = "surfaceFieldValue.dat"
+    h["mdot_engine_face"] = S * on_t("engine_face_mdot", sfv, 0)
     h["p_engine_face"], h["Mach_engine_face"], h["T_engine_face"] = (
         on_t("engine_face_average", sfv, i) for i in range(3))
     h["PressureRecovery_engine_face"] = on_t("engine_face_p0", sfv, 0) / f["p0_inf"]
@@ -660,8 +721,8 @@ def histories(case, f):
     # Stream thrust: x of the integral of p n + rho u (u.n) over a port, n out of the fluid. The net axial
     # force on the vehicle with its engine stream tube is walls + engine face + exhaust (> 0 net drag,
     # < 0 net thrust), as STAR's Fx_body + StreamThrust_face - StreamThrust_exhaust.
-    I = {p: S * (on_t(f"forces_{p}", "force.dat", 3) + on_t(f"{p}_momentum", sfv, 0))
-         for p in ("engine_face", "exhaust")}
+    I = {"engine_face": S * (on_t("engine_face_pressure", sfv, 0) + on_t("engine_face_momentum", sfv, 0)),
+         "exhaust": S * (on_t("forces_exhaust", "force.dat", 3) + on_t("exhaust_momentum", sfv, 0))}
     h["StreamThrust_engine_face"], h["StreamThrust_exhaust"] = I["engine_face"], -I["exhaust"]
     h["Fx_net_with_engine"] = Fx + I["engine_face"] + I["exhaust"]
     h["CX_net_with_engine"] = h["Fx_net_with_engine"] / qS
@@ -703,6 +764,7 @@ PLOTS = [   # (title, series, y label); series missing from the histories (half 
     ("CX net with engine", ["CX_net_with_engine"], "CX net"),
     ("Forces - lift drag side [N]", ["Lift", "Drag", "SideForce"], "Force [N]"),
     ("Force - net axial with engine [N]", ["Fx_body", "Fx_net_with_engine"], "Force [N]"),
+    ("Engine face mass flow [kg/s]", ["mdot_engine_face"], "mdot [kg/s]"),
     ("Inlet pressure recovery", ["PressureRecovery_engine_face"], "p0 / p0_inf"),
     ("Engine face Mach", ["Mach_engine_face"], "Mach"),
     ("Engine face static pressure [Pa]", ["p_engine_face"], "p [Pa]"),
@@ -804,6 +866,14 @@ def format_summary(m):
               f"  {'boundary':<14s} {'Fx_total':>10s} {'Fx_press':>10s} {'Fx_shear':>10s} {'Fz_total':>10s}"]
     lines += [f"  {r['boundary']:<14s} {r['Fx_total']:10.3f} {r['Fx_pressure']:10.3f} "
               f"{r['Fx_shear']:10.3f} {r['Fz_total']:10.3f}" for r in m["breakdown"]]
+    if "p_back" in f and "mdot_engine_face" in rep:
+        ratio = rep["mdot_engine_face"] / f["mdot_air"]
+        lines += ["", "== Engine face (back pressure fixed at the extension outlet, mass flow a result) ==",
+                  f"  outlet back pressure {f['p_back']:.0f} Pa (1D with PT_RECOVERY_EST {f['pt_recovery_est']:.4f})",
+                  f"  mass flow {rep['mdot_engine_face']:.4f} kg/s, target {f['mdot_air']:.4f} ({100 * (ratio - 1):+.2f} %)"]
+        if abs(ratio - 1.0) * 100.0 > MDOT_TARGET_TOL_PCT:
+            lines.append(f"  OFF TARGET: try PT_RECOVERY_EST = {rep['PressureRecovery_engine_face']:.4f} "
+                         "(the engine-face recovery of this run)")
     post = m.get("post")
     if post:
         lines += ["", "== Wall y+ (latest time) =="]

@@ -1,0 +1,5 @@
+// Written by supersonic_detail_run.py: engine back pressure at the extension outlet (example values:
+// 1D at 0.2635 kg/s with recovery 0.9203, ramped down over 1500 iterations on a freestream start)
+type            uniformFixedValue;
+uniformValue    table ((0 40022.458) (1500 37351.712));
+value           uniform 37351.712;

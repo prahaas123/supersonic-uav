@@ -20,7 +20,7 @@ internalField   uniform 0;
 
 boundaryField
 {
-    "(farfield|engine_face|exhaust)"
+    "(farfield|outlet|exhaust)"
     {
         type            calculated;
         value           uniform 0;
@@ -29,7 +29,7 @@ boundaryField
     {
         type            symmetry;
     }
-    "(airframe|inlet_lip|inlet_duct)"
+    "(airframe|inlet_lip|inlet_duct|extension)"
     {
         type            compressible::alphatWallFunction;
         Prt             $Prt;

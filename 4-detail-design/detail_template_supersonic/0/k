@@ -29,12 +29,12 @@ boundaryField
     {
         type            symmetry;
     }
-    "(airframe|inlet_lip|inlet_duct)"
+    "(airframe|inlet_lip|inlet_duct|extension)"
     {
         type            kqRWallFunction;
         value           uniform $kinf;
     }
-    engine_face
+    outlet
     {
         type            inletOutlet;
         inletValue      uniform $kinf;

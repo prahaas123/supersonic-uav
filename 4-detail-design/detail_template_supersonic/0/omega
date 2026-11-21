@@ -29,12 +29,12 @@ boundaryField
     {
         type            symmetry;
     }
-    "(airframe|inlet_lip|inlet_duct)"
+    "(airframe|inlet_lip|inlet_duct|extension)"
     {
         type            omegaWallFunction;
         value           uniform $omegaInf;
     }
-    engine_face
+    outlet
     {
         type            inletOutlet;
         inletValue      uniform $omegaInf;

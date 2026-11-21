@@ -20,7 +20,7 @@ internalField   uniform $nutInf;
 
 boundaryField
 {
-    "(farfield|engine_face|exhaust)"
+    "(farfield|outlet|exhaust)"
     {
         type            calculated;
         value           uniform $nutInf;
@@ -30,7 +30,7 @@ boundaryField
         type            symmetry;
     }
     // Spalding's law covers the viscous sublayer to the log layer (all-y+ treatment)
-    "(airframe|inlet_lip|inlet_duct)"
+    "(airframe|inlet_lip|inlet_duct|extension)"
     {
         type            nutUSpaldingWallFunction;
         value           uniform 0;

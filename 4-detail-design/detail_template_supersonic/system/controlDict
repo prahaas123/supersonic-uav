@@ -42,6 +42,8 @@ rDeltaTSmoothingCoeff 0.02;      // limits the local step ratio between neighbou
 
 // Monitors run every $monitorInterval time steps. Pressures are absolute (pRef 0) as in the
 // STAR-CCM+ setup, so the walls plus the engine face and exhaust form a closed force balance.
+// The engine face is a plane inside the duct (the upstream end of the straight extension, whose outlet
+// holds the back pressure); its point and bounding box come from include/caseVars.
 functions
 {
     // ---------------- forces on the vehicle walls (body axes, moments about the CG) ----------------
@@ -74,12 +76,7 @@ functions
         $forces;
         patches         (inlet_duct);
     }
-    // pressure force on the engine face and exhaust, for the stream-thrust (engine) bookkeeping
-    forces_engine_face
-    {
-        $forces;
-        patches         (engine_face);
-    }
+    // pressure force on the exhaust, for the stream-thrust (engine) bookkeeping
     forces_exhaust
     {
         $forces;
@@ -107,7 +104,8 @@ functions
         writeControl    writeTime;
     }
 
-    // ---------------- engine face and exhaust (mass flows are imposed, so not monitored) ----------------
+    // ---------------- engine face: sampled plane, normal +x, cell values ----------------
+    // rhoU is rhoCentralFoam's conserved momentum field; as a weight field its normal component is used
     engine_face_average
     {
         type            surfaceFieldValue;
@@ -116,30 +114,65 @@ functions
         writeInterval   $monitorInterval;
         log             false;
         writeFields     false;
-        regionType      patch;
+        regionType      sampledSurface;
         name            engine_face;
+        sampledSurfaceDict
+        {
+            type            plane;
+            planeType       pointAndNormal;
+            point           $efPoint;
+            normal          (1 0 0);
+            bounds          $efBounds;
+            interpolate     false;
+        }
         operation       areaAverage;
         fields          (p Ma T);
     }
+    // mass flow, integral of rhoU . n dA
+    engine_face_mdot
+    {
+        $engine_face_average;
+        operation       areaNormalIntegrate;
+        fields          (rhoU);
+    }
+    // mass-weighted total pressure
     engine_face_p0
     {
         $engine_face_average;
-        operation       weightedAverage;
-        weightField     phi;
+        operation       weightedAreaAverage;
+        weightField     rhoU;
         fields          (p0);
     }
-    // sum(phi U): momentum flux out of the domain (signed weights)
+    // stream thrust = integral of p dA + integral of (rhoU . n) U dA
+    engine_face_pressure
+    {
+        $engine_face_average;
+        operation       areaIntegrate;
+        fields          (p);
+    }
     engine_face_momentum
     {
         $engine_face_average;
+        operation       weightedAreaIntegrate;
+        weightField     rhoU;
+        fields          (U);
+    }
+
+    // ---------------- exhaust (mass flow imposed) ----------------
+    // sum(phi U): momentum flux out of the domain (signed weights)
+    exhaust_momentum
+    {
+        type            surfaceFieldValue;
+        libs            (fieldFunctionObjects);
+        writeControl    timeStep;
+        writeInterval   $monitorInterval;
+        log             false;
+        writeFields     false;
+        regionType      patch;
+        name            exhaust;
         operation       weightedSum;
         weightField     phi;
         fields          (U);
-    }
-    exhaust_momentum
-    {
-        $engine_face_momentum;
-        name            exhaust;
     }
 
     // ---------------- fields for post processing (write times only) ----------------
