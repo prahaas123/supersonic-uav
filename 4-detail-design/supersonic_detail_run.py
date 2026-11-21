@@ -51,7 +51,7 @@ EXHAUST_VISC_RATIO     = 10.0
 #     are results sampled on the engine-face plane (as 3-inlet-design/run_inlet.py)
 PT_RECOVERY_EST = 0.94 * 0.979   # engine-face p0 / p0_inf assumed for the 1D back pressure: 2D external
                                  # compression x S-duct recovery of design 39 (0-results/inlet_dse_results.csv)
-P_BACK          = None           # [Pa] outlet static pressure; None = 1D value at MDOT_AIR with PT_RECOVERY_EST
+P_BACK          = 35500.0        # [Pa] outlet static pressure; None = 1D value at MDOT_AIR with PT_RECOVERY_EST
 RAMP_ITERS      = 1500           # back pressure ramps down to P_BACK over these iterations (freestream start) ...
 P_START_FRAC    = 0.2            # ... from p0_face - P_START_FRAC * (p0_face - P_BACK)
 MDOT_TARGET_TOL_PCT = 0.5        # engine-face mass flow vs MDOT_AIR, reported only (it is a result)
@@ -285,7 +285,7 @@ def flow_conditions(geo, half):
         engine_face_area=ef["area"], engine_face_x=ef["x"], engine_face_centre=ef["centre"],
         engine_face_radius=ef["radius"], outlet_x=ef["x_outlet"], pt_recovery_est=PT_RECOVERY_EST,
         mach_engine_face_1d=M_ef,
-        p_back=p_back, p_back_start=p0_ef - P_START_FRAC * (p0_ef - p_back), ramp_iters=RAMP_ITERS,
+        p_back=p_back, p_back_set=P_BACK is not None, p_back_start=p0_ef - P_START_FRAC * (p0_ef - p_back), ramp_iters=RAMP_ITERS,
         exhaust_mach_1d=M_ex, exhaust_T_1d=T_ex, exhaust_U_1d=U_ex, exhaust_rho_1d=rho_ex,
         exhaust_supersonic=M_ex >= 1.0, exhaust_U_vec=[U_ex * c for c in geo["normal"]["exhaust"]],
         exhaust_thrust_1d=mdot_ex * U_ex + (P_EXHAUST - p) * geo["area"]["exhaust"],
@@ -298,8 +298,9 @@ def print_conditions(f):
     print(f"  {f['altitude_m'] / 1000:g} km ISA: p {f['p_inf']:.1f} Pa, T {f['T_inf']:.2f} K, "
           f"rho {f['rho_inf']:.5f} kg/m3, V {f['V_inf']:.1f} m/s, q {f['q_inf']:.0f} Pa, p0 {f['p0_inf']:.0f} Pa")
     print(f"  engine face x {f['engine_face_x']:.4f} m, {f['engine_face_area'] * 1e4:.2f} cm2 | outlet back pressure "
-          f"{f['p_back']:.0f} Pa (1D: {f['mdot_air']:g} kg/s, Mach {f['mach_engine_face_1d']:.3f} with recovery "
-          f"{f['pt_recovery_est']:.4f})")
+          f"{f['p_back']:.0f} Pa " + ("(P_BACK) | 1D design point" if f["p_back_set"] else "(1D") +
+          f": {f['mdot_air']:g} kg/s, Mach {f['mach_engine_face_1d']:.3f} with recovery "
+          f"{f['pt_recovery_est']:.4f}" + ("" if f["p_back_set"] else ")"))
     print(f"  exhaust {f['mdot_exhaust']:g} kg/s, T0 {f['T0_exhaust']:g} K, p {f['p_exhaust']:g} Pa -> 1D Mach "
           f"{f['exhaust_mach_1d']:.3f}, U {f['exhaust_U_1d']:.0f} m/s, gross thrust {f['exhaust_thrust_1d']:.1f} N")
     if not f["exhaust_supersonic"]:
@@ -934,10 +935,12 @@ def format_summary(m):
               f"{r['Fx_shear']:10.3f} {r['Fz_total']:10.3f}" for r in m["breakdown"]]
     if "p_back" in f and "mdot_engine_face" in rep:
         ratio = rep["mdot_engine_face"] / f["mdot_air"]
+        fixed = f.get("p_back_set", False)
         lines += ["", "== Engine face (back pressure fixed at the extension outlet, mass flow a result) ==",
-                  f"  outlet back pressure {f['p_back']:.0f} Pa (1D with PT_RECOVERY_EST {f['pt_recovery_est']:.4f})",
+                  f"  outlet back pressure {f['p_back']:.0f} Pa " + ("(set by P_BACK)" if fixed else
+                                                                      f"(1D with PT_RECOVERY_EST {f['pt_recovery_est']:.4f})"),
                   f"  mass flow {rep['mdot_engine_face']:.4f} kg/s, target {f['mdot_air']:.4f} ({100 * (ratio - 1):+.2f} %)"]
-        if abs(ratio - 1.0) * 100.0 > MDOT_TARGET_TOL_PCT:
+        if abs(ratio - 1.0) * 100.0 > MDOT_TARGET_TOL_PCT and not fixed:
             lines.append(f"  OFF TARGET: try PT_RECOVERY_EST = {rep['PressureRecovery_engine_face']:.4f} "
                          "(the engine-face recovery of this run)")
     post = m.get("post")
