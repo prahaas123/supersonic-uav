@@ -273,7 +273,8 @@ def flow_conditions(geo, half):
         k_inf=k, omega_inf=omega, nut_inf=nut,
         mdot_air=MDOT_AIR, mdot_exhaust=mdot_ex, T0_exhaust=T0_EXHAUST, p_exhaust=P_EXHAUST,
         engine_face_area=ef["area"], engine_face_x=ef["x"], engine_face_centre=ef["centre"],
-        engine_face_radius=ef["radius"], pt_recovery_est=PT_RECOVERY_EST, mach_engine_face_1d=M_ef,
+        engine_face_radius=ef["radius"], outlet_x=ef["x_outlet"], pt_recovery_est=PT_RECOVERY_EST,
+        mach_engine_face_1d=M_ef,
         p_back=p_back, p_back_start=p0_ef - P_START_FRAC * (p0_ef - p_back), ramp_iters=RAMP_ITERS,
         exhaust_mach_1d=M_ex, exhaust_T_1d=T_ex, exhaust_U_1d=U_ex, exhaust_rho_1d=rho_ex,
         exhaust_supersonic=M_ex >= 1.0, exhaust_U_vec=[U_ex * c for c in geo["normal"]["exhaust"]],
@@ -329,7 +330,7 @@ def geometry_info(path):
         raise SystemExit(f"{path}: the outlet must be a plane normal to x (normal {normal['outlet']})")
     x_ef = float(np.asarray(verts["extension"], dtype=float)[:, 0].min())
     engine_face = {"x": x_ef, "centre": [x_ef, centre["outlet"][1], centre["outlet"][2]], "area": area["outlet"],
-                   "radius": math.sqrt(area["outlet"] / math.pi)}
+                   "radius": math.sqrt(area["outlet"] / math.pi), "x_outlet": centre["outlet"][0]}
     return {"area": area, "normal": normal, "engine_face": engine_face}
 
 # =====================================================================================================

@@ -28,7 +28,6 @@ NOSE = ([-0.15, 0, 0], [-0.15, -8, 0], UPZ, 0.14)
 ISO_TOP = ([0.6, 0, 0.05], [-2.6, -3.4, 2.6], UPZ, 0.75)
 ISO_BOTTOM = ([0.6, 0, 0.05], [-2.6, -3.4, -2.6], UPZ, 0.75)
 ISO_AFT = ([0.9, 0, 0.05], [4.0, -3.2, 2.4], UPZ, 0.85)
-FRONT = ([1.0345, 0, 0], [-6, 0, 0], UPZ, 0.055)
 ISO_STN = ([0.9, 0, 0.08], [-1.0, -4.6, 1.5], UPZ, 0.62)
 STATIONS = [0.45, 0.85, 1.30, 1.70]
 NEAR_BOX = {"y": (-0.62, 0.62), "z": (-0.15, 0.35)}   # station cuts trimmed to the near field
@@ -41,6 +40,9 @@ with open(os.path.join(case, "metrics.json")) as fh:
 F = M["flow"]
 G, R = F["gamma"], F["R"]
 HALF = F["half_model"]
+EF_C, EF_R = F["engine_face_centre"], F["engine_face_radius"]   # engine-face plane (inside the duct)
+X_OUTLET = F["outlet_x"]             # end of the straight extension (engine stand-in), hidden in the scenes
+FRONT = (EF_C, [-6, EF_C[1], EF_C[2]], UPZ, 0.055)
 
 def reader(regions):
     r = OpenFOAMReader(FileName=foam)
@@ -103,6 +105,27 @@ def near_field(src, x):
     c.ClipType = "Box"
     c.ClipType.Position = [x - 0.05, NEAR_BOX["y"][0], NEAR_BOX["z"][0]]
     c.ClipType.Length = [0.1, NEAR_BOX["y"][1] - NEAR_BOX["y"][0], NEAR_BOX["z"][1] - NEAR_BOX["z"][0]]
+    c.Invert = 1                     # keep the inside of the box
+    c.UpdatePipeline(T_LATEST)
+    return c
+
+def without_extension(src):
+    # Removes the extension cells (engine face to outlet), so the scenes end the duct at the engine face as
+    # the engine does. The box is the duct section +10 %, inside the fuselage, so no outer flow is cut.
+    c = Clip(Input=src)
+    c.ClipType = "Box"
+    c.ClipType.Position = [EF_C[0], EF_C[1] - 1.1 * EF_R, EF_C[2] - 1.1 * EF_R]
+    c.ClipType.Length = [X_OUTLET - EF_C[0] + 0.002, 2.2 * EF_R, 2.2 * EF_R]
+    c.Invert = 0                     # keep the outside of the box
+    c.UpdatePipeline(T_LATEST)
+    return c
+
+def engine_face(src):
+    # x plane at the engine face, trimmed to a box around the duct section (the plane also cuts the outer flow)
+    c = Clip(Input=plane(src, EF_C, [1, 0, 0]))
+    c.ClipType = "Box"
+    c.ClipType.Position = [EF_C[0] - 0.01, EF_C[1] - 1.1 * EF_R, EF_C[2] - 1.1 * EF_R]
+    c.ClipType.Length = [0.02, 2.2 * EF_R, 2.2 * EF_R]
     c.Invert = 1                     # keep the inside of the box
     c.UpdatePipeline(T_LATEST)
     return c
@@ -182,7 +205,8 @@ def mesh_scene(name, parts, cam):
         for p in parts:
             solid(Show(p, rv), MESH_COLOUR, edges=True)
     else:
-        solid(Show(VEHICLE, rv), GREY, edges=True)
+        for v in VEHICLE:
+            solid(Show(v, rv), GREY, edges=True)
     save(rv, name)
 
 def scalar_scene(name, array, lo, hi, parts, cam, cmap=None, vehicle=False, title=None, log=False, inverted=False):
@@ -194,7 +218,8 @@ def scalar_scene(name, array, lo, hi, parts, cam, cmap=None, vehicle=False, titl
             return
         colour(Show(p, rv), rv, array, lo, hi, cmap, title, log, inverted)
     if vehicle:
-        solid(Show(VEHICLE, rv), GREY)
+        for v in VEHICLE:
+            solid(Show(v, rv), GREY)
     save(rv, name)
 
 def lic_scene(name, cam):
@@ -251,10 +276,12 @@ def checks():
 
 VOL_RAW = reader(["internalMesh"])
 T_LATEST = latest(VOL_RAW)
-VOL = derived(VOL_RAW)
+VOL = derived(VOL_RAW)              # whole fluid: checks
+VOL_VIEW = without_extension(VOL)   # scenes: the duct ends at the engine face
 SURF = mirror(derived(reader([f"patch/{p}" for p in WALLS])))
-ENGINE = mirror(derived(reader(["patch/engine_face"])))
-VEHICLE = mirror(reader([f"patch/{p}" for p in WALLS] + ["patch/engine_face", "patch/exhaust"]))
+ENGINE = mirror(engine_face(VOL))
+# grey vehicle: walls and exhaust, the duct closed by the engine-face disc (extension and outlet left out)
+VEHICLE = [mirror(reader([f"patch/{p}" for p in WALLS] + ["patch/exhaust"])), ENGINE]
 
 print("checks ...", flush=True)
 M = json.load(open(os.path.join(case, "metrics.json")))
@@ -263,12 +290,12 @@ with open(os.path.join(case, "metrics.json"), "w") as fh:
     json.dump(M, fh, indent=2)
 
 print("derived parts ...", flush=True)
-pY0 = plane(VOL, [0, Y_SLICE, 0], [0, 1, 0])
-pY0_mesh = plane(VOL, [0, Y_SLICE, 0], [0, 1, 0], triangulate=False)
-pZ0 = mirror(plane(VOL, [0, 0, 0.013], [0, 0, 1]))          # through the wing (z = 0.006 - 0.023 m)
-pZ0_mesh = mirror(plane(VOL, [0, 0, 0.013], [0, 0, 1], triangulate=False))
-pZin = mirror(plane(VOL, [0, 0, 0.1034], [0, 0, 1]))        # inlet lip height
-stations = [near_field(mirror(plane(VOL, [x, 0, 0], [1, 0, 0])), x) for x in STATIONS]
+pY0 = plane(VOL_VIEW, [0, Y_SLICE, 0], [0, 1, 0])
+pY0_mesh = plane(VOL_VIEW, [0, Y_SLICE, 0], [0, 1, 0], triangulate=False)
+pZ0 = mirror(plane(VOL_VIEW, [0, 0, 0.013], [0, 0, 1]))          # through the wing (z = 0.006 - 0.023 m)
+pZ0_mesh = mirror(plane(VOL_VIEW, [0, 0, 0.013], [0, 0, 1], triangulate=False))
+pZin = mirror(plane(VOL_VIEW, [0, 0, 0.1034], [0, 0, 1]))        # inlet lip height
+stations = [near_field(mirror(plane(VOL_VIEW, [x, 0, 0], [1, 0, 0])), x) for x in STATIONS]
 
 print("scenes ...", flush=True)
 # mesh
