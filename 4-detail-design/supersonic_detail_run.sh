@@ -9,6 +9,8 @@
 #SBATCH --mem=50G
 #SBATCH --output=supersonic_detail_run.log
 #SBATCH --open-mode=append
+#SBATCH --mail-user=kprahaask@gmail.com
+#SBATCH --mail-type=END,FAIL,TIME_LIMIT_90
 
 module load StdEnv/2023
 module load gcc/12.3
