@@ -114,13 +114,13 @@ LOCATION_IN_MESH = (-2.0123, 2.0123, 2.0123)   # any point in the fluid with y >
 # RUN CONTROL
 # =====================================================================================================
 CASE_TEMPLATE    = os.path.join(HERE, "detail_template_supersonic")
-NP               = 50            # MPI processes
+NP               = 100           # MPI processes
 # Local time stepping (ddtScheme localEuler): a pseudo-time march to the steady state where every cell
 # takes its own largest stable step, so the ~0.1 mm wall and lip cells do not hold back the 0.4 m
 # far-field cells. OpenFOAM time is the iteration count (deltaT 1).
 MAX_ITERATIONS   = 30000         # cap, ~1.1 s each on 50 cores
 WRITE_INTERVAL   = 1000          # [iterations] field writes (the last two are kept)
-MAX_COURANT      = 0.3           # local Courant number of every cell
+MAX_COURANT      = 0.4           # local Courant number of every cell
 MONITOR_INTERVAL = 10            # iterations between monitor samples
 POLL_S           = 120           # [s] between stopping-criterion checks while the solver runs
 # Initial field: "auto" = the finished case on the same mesh closest in (Mach, alpha, beta), converged

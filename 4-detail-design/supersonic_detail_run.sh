@@ -4,7 +4,7 @@
 #SBATCH --account=def-jphickey
 #SBATCH --time=1-00:00:00
 #SBATCH --nodes=1
-#SBATCH --ntasks-per-node=50
+#SBATCH --ntasks-per-node=100
 #SBATCH --cpus-per-task=1
 #SBATCH --mem=50G
 #SBATCH --output=supersonic_detail_run.log
