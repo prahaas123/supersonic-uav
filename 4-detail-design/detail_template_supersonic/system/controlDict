@@ -38,12 +38,8 @@ runTimeModifiable true;
 adjustTimeStep  no;
 maxCo           $maxCourant;
 maxDeltaT       1;                // no cap on the local step
-rDeltaTSmoothingCoeff 0.02;      // limits the local step ratio between neighbouring cells
+rDeltaTSmoothingCoeff 0.2;       // limits the local step ratio between neighbouring cells
 
-// Monitors run every $monitorInterval time steps. Pressures are absolute (pRef 0) as in the
-// STAR-CCM+ setup, so the walls plus the engine face and exhaust form a closed force balance.
-// The engine face is a plane inside the duct (the upstream end of the straight extension, whose outlet
-// holds the back pressure); its point and bounding box come from include/caseVars.
 functions
 {
     // ---------------- forces on the vehicle walls (body axes, moments about the CG) ----------------

@@ -4,7 +4,7 @@
 #SBATCH --job-name=supersonic_detail_run
 #SBATCH --account=def-jphickey
 #SBATCH --time=1-00:00:00
-#SBATCH --array=0-3
+#SBATCH --array=0-0
 #SBATCH --nodes=1
 #SBATCH --ntasks-per-node=100
 #SBATCH --cpus-per-task=1
@@ -15,10 +15,10 @@
 #SBATCH --mail-type=END,FAIL,TIME_LIMIT_90
 
 # Cases: 
-MACHS=(1.1 1.2 1.3 1.4)
-ALPHAS=(0 0 0 0)
-BETAS=(0 0 0 0)
-P_BACKS=(capture capture capture capture)
+MACHS=(1.4)
+ALPHAS=(0)
+BETAS=(0)
+P_BACKS=(capture)
 INIT_FROM=auto
 
 i=$SLURM_ARRAY_TASK_ID
