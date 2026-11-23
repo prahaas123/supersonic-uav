@@ -38,5 +38,5 @@ pip install --no-index numpy matplotlib
 
 export SQUEUE_FORMAT='%i","%j","%t","%M","%L","%D","%C","%m","%b","%R'
 
-python3 subsonic_detail_run.py --mach ${MACHS[$i]} --alpha ${ALPHAS[$i]} --beta ${BETAS[$i]} \
+python3 subsonic_run.py --mach ${MACHS[$i]} --alpha ${ALPHAS[$i]} --beta ${BETAS[$i]} \
                                --altitude ${ALTITUDES[$i]} --init-from $INIT_FROM

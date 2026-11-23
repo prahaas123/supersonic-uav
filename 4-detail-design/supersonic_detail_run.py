@@ -548,7 +548,12 @@ def prepare_case(case, mesh_dir, f):
     shutil.rmtree(case, ignore_errors=True)
     shutil.copytree(mesh_dir, case, ignore=shutil.ignore_patterns(
         "processor*", "log.*", "*.foam", "metrics.json", "postProcessing"))
-    # solver settings from the template, so a reused mesh does not carry older ones
+    # boundary conditions, gas / turbulence models and solver settings from the template, so a reused mesh
+    # does not carry older ones (the mesh directory keeps the template of the day it was built)
+    shutil.rmtree(os.path.join(case, "0"), ignore_errors=True)
+    shutil.copytree(os.path.join(CASE_TEMPLATE, "0"), os.path.join(case, "0"))
+    for name in ("thermophysicalProperties", "turbulenceProperties"):
+        shutil.copy(os.path.join(CASE_TEMPLATE, "constant", name), os.path.join(case, "constant", name))
     for name in ("controlDict", "fvSchemes", "fvSolution", "fvOptions"):
         shutil.copy(os.path.join(CASE_TEMPLATE, "system", name), os.path.join(case, "system", name))
     open(os.path.join(case, os.path.basename(case) + ".foam"), "w").close()
