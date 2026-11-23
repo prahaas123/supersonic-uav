@@ -1,8 +1,8 @@
 /*--------------------------------*- C++ -*----------------------------------*\
 | =========                 |                                                 |
 | \\      /  F ield         | OpenFOAM: The Open Source CFD Toolbox           |
-|  \\    /   O peration     | Version:  v2312                                |
-|   \\  /    A nd           | Website:  www.openfoam.com                      |
+|  \\    /   O peration     | Version: v2312                                  |
+|   \\  /    A nd           | Web: www.openfoam.com                           |
 |    \\/     M anipulation  |                                                 |
 \*---------------------------------------------------------------------------*/
 FoamFile
@@ -12,112 +12,232 @@ FoamFile
     class       dictionary;
     object      controlDict;
 }
-// * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * //
+// ============================================================================
 
-application     simpleFoam;
+// Steady SIMPLE(C) iterations: deltaT 1, so time = iteration count. Iteration cap, write interval, monitor
+// interval and the moment reference point are written by subsonic_detail_run.py. The script also sets stopAt to
+// writeNow once the asymptotic stopping criteria are met (runTimeModifiable re-reads this file).
+#include "include/caseVars"
 
-startFrom       startTime;
-
+application     rhoSimpleFoam;
+startFrom       latestTime;
 startTime       0;
-
 stopAt          endTime;
-
-endTime         1000.0;
-
-deltaT          1.0;
-
+endTime         $tEnd;
+deltaT          1;
 writeControl    timeStep;
-
-writeInterval   1;
-
+writeInterval   $tWrite;
 purgeWrite      2;
-
-writeFormat     ascii;
-
-writePrecision  6;
-
+writeFormat     binary;
+writePrecision  15;
 writeCompression off;
-
 timeFormat      general;
-
-timePrecision   6;
-
+timePrecision   8;
 runTimeModifiable true;
 
-allowSystemOperations 1;
-
+// Monitors run every $monitorInterval time steps. Pressures are absolute (pRef 0) as in the
+// STAR-CCM+ setup, so the walls plus the engine face and exhaust form a closed force balance.
+// The engine face is a plane inside the duct (the upstream end of the straight extension, whose outlet
+// holds the back pressure); its point and bounding box come from include/caseVars.
 functions
 {
-    forceCoeffsWing
+    // ---------------- forces on the vehicle walls (body axes, moments about the CG) ----------------
+    forces
     {
-        type            forceCoeffs;
+        type            forces;
         libs            (forces);
         writeControl    timeStep;
-        writeInterval   1;
-        log             yes;
-        patches         (uav);
+        writeInterval   $monitorInterval;
+        log             false;
+        patches         (airframe inlet_lip inlet_duct);
         rho             rhoInf;
-        rhoInf          1.225;
-        liftDir         (0 0 1);
-        dragDir         (1 0 0);
-        CofR            (0.05 0 0);
-        pitchAxis       (0 1 0);
-        magUInf         20;
-        lRef            0.23;
-        Aref            0.171;
+        rhoInf          $rhoInfRef;
+        pRef            0;
+        CofR            $cg;
     }
-    
+    // per-wall breakdown (pressure / viscous)
+    forces_airframe
+    {
+        $forces;
+        patches         (airframe);
+    }
+    forces_inlet_lip
+    {
+        $forces;
+        patches         (inlet_lip);
+    }
+    forces_inlet_duct
+    {
+        $forces;
+        patches         (inlet_duct);
+    }
+    // pressure force on the exhaust, for the stream-thrust (engine) bookkeeping
+    forces_exhaust
+    {
+        $forces;
+        patches         (exhaust);
+    }
+
+    // ---------------- derived fields used by the engine monitors ----------------
+    // momentum per volume rho U (rhoSimpleFoam has no conserved rhoU field, unlike rhoCentralFoam)
+    rhoU
+    {
+        type            exprField;
+        libs            (fieldFunctionObjects);
+        field           rhoU;
+        expression      "rho*U";
+        action          new;
+        autowrite       false;
+        executeControl  timeStep;
+        executeInterval $monitorInterval;
+        writeControl    none;
+    }
+    MachNo
+    {
+        type            MachNo;
+        libs            (fieldFunctionObjects);
+        executeControl  timeStep;
+        executeInterval $monitorInterval;
+        writeControl    writeTime;
+    }
+    // isentropic total pressure p (1 + (gamma-1)/2 M^2)^(gamma/(gamma-1)), absolute
+    totalPressure
+    {
+        type            pressure;
+        libs            (fieldFunctionObjects);
+        mode            isentropic;
+        result          p0;
+        executeControl  timeStep;
+        executeInterval $monitorInterval;
+        writeControl    writeTime;
+    }
+
+    // ---------------- engine face: sampled plane, normal +x, cell values ----------------
+    // rhoU (above) as a weight field: its normal component is used
+    engine_face_average
+    {
+        type            surfaceFieldValue;
+        libs            (fieldFunctionObjects);
+        writeControl    timeStep;
+        writeInterval   $monitorInterval;
+        log             false;
+        writeFields     false;
+        regionType      sampledSurface;
+        name            engine_face;
+        sampledSurfaceDict
+        {
+            type            plane;
+            planeType       pointAndNormal;
+            pointAndNormalDict
+            {
+                point       $efPoint;
+                normal      (1 0 0);
+            }
+            bounds          $efBounds;
+            interpolate     false;
+        }
+        operation       areaAverage;
+        fields          (p Ma T);
+    }
+    // mass flow, integral of rhoU . n dA
+    engine_face_mdot
+    {
+        $engine_face_average;
+        operation       areaNormalIntegrate;
+        fields          (rhoU);
+    }
+    // mass-weighted total pressure
+    engine_face_p0
+    {
+        $engine_face_average;
+        operation       weightedAreaAverage;
+        weightField     rhoU;
+        fields          (p0);
+    }
+    // stream thrust = integral of p dA + integral of (rhoU . n) U dA
+    engine_face_pressure
+    {
+        $engine_face_average;
+        operation       areaIntegrate;
+        fields          (p);
+    }
+    engine_face_momentum
+    {
+        $engine_face_average;
+        operation       weightedAreaIntegrate;
+        weightField     rhoU;
+        fields          (U);
+    }
+
+    // ---------------- exhaust (mass flow imposed) ----------------
+    // sum(phi U): momentum flux out of the domain (signed weights)
+    exhaust_momentum
+    {
+        type            surfaceFieldValue;
+        libs            (fieldFunctionObjects);
+        writeControl    timeStep;
+        writeInterval   $monitorInterval;
+        log             false;
+        writeFields     false;
+        regionType      patch;
+        name            exhaust;
+        operation       weightedSum;
+        weightField     phi;
+        fields          (U);
+    }
+
+    // ---------------- fields for post processing (write times only) ----------------
+    gradRho
+    {
+        type            grad;
+        libs            (fieldFunctionObjects);
+        field           rho;
+        executeControl  writeTime;
+        writeControl    writeTime;
+    }
     yPlus
     {
         type            yPlus;
-        libs            ("libfieldFunctionObjects.so");
-        writeControl    timeStep;   
+        libs            (fieldFunctionObjects);
+        executeControl  writeTime;
+        writeControl    writeTime;
+        patches         (airframe inlet_lip inlet_duct);
     }
-
-    wallShearStress1
+    wallShearStress
     {
         type            wallShearStress;
         libs            (fieldFunctionObjects);
-        patches         (uav); 
+        patches         (airframe inlet_lip inlet_duct);
         writeToFile     true;
-        writeControl    timeStep;
-        writeInterval   50;
+        executeControl  writeTime;
+        writeControl    writeTime;
     }
-
-    forcesWing
+    wallHeatFlux
     {
-        type        forces;
-        libs        ("libforces.so");
-        writeControl    timeStep;
-        writeInterval   1;
-        patches     (uav);          
-        p           p;
-        U           U;
-        rho         rhoInf;           
-        rhoInf      1.225;             
-        pRef        0;            
-        CofR        (0.05 0 0);           // GEOMETRY DEPENDANT - CHANGE ME
-        writeFields     yes;
+        type            wallHeatFlux;
+        libs            (fieldFunctionObjects);
+        patches         (airframe inlet_lip inlet_duct);
+        writeToFile     true;
+        executeControl  writeTime;
+        writeControl    writeTime;
     }
-    qCriterion
+    // field extremes with their locations, for diagnosing a diverging run
+    fieldMinMax
     {
-        type            Q;
-        libs            ("libfieldFunctionObjects.so");
+        type            fieldMinMax;
+        libs            (fieldFunctionObjects);
+        fields          (T p U);
+        location        true;
+        log             false;
         writeControl    timeStep;
-        writeInterval   50;
+        writeInterval   $monitorInterval;
     }
-    vorticity
+    residuals
     {
-        type            vorticity;
-        libs            ("libfieldFunctionObjects.so");
+        type            solverInfo;
+        libs            (utilityFunctionObjects);
+        fields          (U p h k omega);
         writeControl    timeStep;
-        writeInterval   50;
+        writeInterval   $monitorInterval;
     }
 }
-
-OptimisationSwitches
-{
-    fileHandler collated;
-}
-
-// ************************************************************************* //

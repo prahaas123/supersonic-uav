@@ -1,8 +1,8 @@
 /*--------------------------------*- C++ -*----------------------------------*\
 | =========                 |                                                 |
 | \\      /  F ield         | OpenFOAM: The Open Source CFD Toolbox           |
-|  \\    /   O peration     | Version:  v2306                                 |
-|   \\  /    A nd           | Website:  www.openfoam.com                      |
+|  \\    /   O peration     | Version: v2312                                  |
+|   \\  /    A nd           | Web: www.openfoam.com                           |
 |    \\/     M anipulation  |                                                 |
 \*---------------------------------------------------------------------------*/
 FoamFile
@@ -12,48 +12,37 @@ FoamFile
     class       volScalarField;
     object      omega;
 }
-// * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * //
+// ============================================================================
 
-#include        "include/initialConditions"
-
+#include        "include/flowVars"
 dimensions      [0 0 -1 0 0 0 0];
-
-internalField   uniform $turbulentOmega;
+internalField   uniform $omegaInf;
 
 boundaryField
 {
-    #includeEtc "caseDicts/setConstraintTypes"
-
-    xMin
+    farfield
     {
         type            freestream;
-        freestreamValue $internalField;
+        freestreamValue uniform $omegaInf;
     }
-    xMax
+    symmetry
     {
-        type            freestream;
-        freestreamValue $internalField;
+        type            symmetry;
     }
-    yMin
-    {
-        type            slip;
-    }
-    yMax
-    {
-        type            slip;
-    }
-    zMin
-    {
-        type            slip;
-    }
-    zMax
-    {
-        type            slip;
-    }
-    uav
+    "(airframe|inlet_lip|inlet_duct|extension)"
     {
         type            omegaWallFunction;
-        value           uniform 0;
+        value           uniform $omegaInf;
     }
-
+    outlet
+    {
+        type            inletOutlet;
+        inletValue      uniform $omegaInf;
+        value           uniform $omegaInf;
+    }
+    exhaust
+    {
+        type            fixedValue;
+        value           uniform $omegaExhaust;
+    }
 }

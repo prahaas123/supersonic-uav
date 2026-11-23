@@ -1,0 +1,52 @@
+/*--------------------------------*- C++ -*----------------------------------*\
+| =========                 |                                                 |
+| \\      /  F ield         | OpenFOAM: The Open Source CFD Toolbox           |
+|  \\    /   O peration     | Version:  v2312                                 |
+|   \\  /    A nd           | Website:  www.openfoam.com                      |
+|    \\/     M anipulation  |                                                 |
+\*---------------------------------------------------------------------------*/
+FoamFile
+{
+    version     2.0;
+    format      ascii;
+    class       dictionary;
+    object      thermophysicalProperties;
+}
+// * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * //
+
+#include "include/gasVars"
+
+// Ideal gas, constant cp (gamma = 1.4 everywhere, also in the 2250 K exhaust), Sutherland viscosity.
+// Thermal conductivity follows from the modified Eucken relation of the sutherland transport model.
+thermoType
+{
+    type            hePsiThermo;
+    mixture         pureMixture;
+    transport       sutherland;
+    thermo          hConst;
+    equationOfState perfectGas;
+    specie          specie;
+    energy          sensibleEnthalpy;      // h: the pressure work stays implicit, more robust than e
+                                           // across the 2250 K exhaust plume with rhoSimpleFoam
+}
+
+mixture
+{
+    specie
+    {
+        molWeight       $gasMolWeight;
+    }
+    thermodynamics
+    {
+        Cp              $gasCp;
+        Hf              0;
+    }
+    transport
+    {
+        As              $sutherlandAs;
+        Ts              $sutherlandTs;
+    }
+}
+
+
+// ************************************************************************* //

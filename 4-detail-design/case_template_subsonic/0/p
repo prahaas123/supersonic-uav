@@ -1,8 +1,8 @@
 /*--------------------------------*- C++ -*----------------------------------*\
 | =========                 |                                                 |
 | \\      /  F ield         | OpenFOAM: The Open Source CFD Toolbox           |
-|  \\    /   O peration     | Version:  v2306                                 |
-|   \\  /    A nd           | Website:  www.openfoam.com                      |
+|  \\    /   O peration     | Version: v2312                                  |
+|   \\  /    A nd           | Web: www.openfoam.com                           |
 |    \\/     M anipulation  |                                                 |
 \*---------------------------------------------------------------------------*/
 FoamFile
@@ -12,46 +12,43 @@ FoamFile
     class       volScalarField;
     object      p;
 }
-// * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * //
+// ============================================================================
 
-#include        "include/initialConditions"
-
-dimensions      [0 2 -2 0 0 0 0];
-
-internalField   uniform $pressure;
+#include        "include/flowVars"
+dimensions      [1 -1 -2 0 0 0 0];
+internalField   uniform $pInf;      // absolute pressure
 
 boundaryField
 {
-    #includeEtc "caseDicts/setConstraintTypes"
-    xMin
+    // Subsonic free stream: fixed at outflow faces, extrapolated at inflow faces (freestreamVelocity does the
+    // opposite), so one characteristic is imposed and one leaves on each face
+    farfield
     {
         type            freestreamPressure;
-        freestreamValue $internalField;
+        freestreamValue uniform $pInf;
+        supersonic      false;
+        value           uniform $pInf;
     }
-    xMax
+    symmetry
     {
-        type            freestreamPressure;
-        freestreamValue $internalField;
+        type            symmetry;
     }
-    yMin
-    {
-        type            zeroGradient;
-    }
-    yMax
+    "(airframe|inlet_lip|inlet_duct|extension)"
     {
         type            zeroGradient;
     }
-    zMin
+    // Engine back pressure: the 1D engine-face static pressure at the design corrected mass flow with an
+    // assumed recovery (PT_RECOVERY_EST in subsonic_detail_run.py), ramped down from near the engine-face
+    // total pressure on a freestream start.
+    // The engine-face mass flow is a result.
+    outlet
     {
-        type            zeroGradient;
+        #include        "include/outletPressure"
     }
-    zMax
+    // Convergent-nozzle exhaust: zeroGradient when the exit is subsonic (exit pressure follows the ambient),
+    // fixed at the sonic pressure when the nozzle chokes (written by subsonic_detail_run.py)
+    exhaust
     {
-        type            zeroGradient;
+        #include        "include/exhaustPressure"
     }
-    uav
-    {
-        type            zeroGradient;
-    }
-
 }

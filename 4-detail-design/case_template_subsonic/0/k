@@ -1,8 +1,8 @@
 /*--------------------------------*- C++ -*----------------------------------*\
 | =========                 |                                                 |
 | \\      /  F ield         | OpenFOAM: The Open Source CFD Toolbox           |
-|  \\    /   O peration     | Version:  v2306                                 |
-|   \\  /    A nd           | Website:  www.openfoam.com                      |
+|  \\    /   O peration     | Version: v2312                                  |
+|   \\  /    A nd           | Web: www.openfoam.com                           |
 |    \\/     M anipulation  |                                                 |
 \*---------------------------------------------------------------------------*/
 FoamFile
@@ -12,52 +12,37 @@ FoamFile
     class       volScalarField;
     object      k;
 }
-// * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * //
+// ============================================================================
 
-#include        "include/initialConditions"
-
+#include        "include/flowVars"
 dimensions      [0 2 -2 0 0 0 0];
-
-internalField   uniform $turbulentKE;
+internalField   uniform $kinf;
 
 boundaryField
 {
-    #includeEtc "caseDicts/setConstraintTypes"
-
-    xMin
+    farfield
     {
         type            freestream;
-        freestreamValue $internalField;
+        freestreamValue uniform $kinf;
     }
-    xMax
+    symmetry
     {
-        type            freestream;
-        freestreamValue $internalField;
+        type            symmetry;
     }
-
-    yMin
-    {
-        type            slip;
-    }
-    yMax
-    {
-        type            slip;
-    }
-    zMin
-    {
-        type            slip;
-    }
-    zMax
-    {
-        type            slip;
-    }
-    uav
+    "(airframe|inlet_lip|inlet_duct|extension)"
     {
         type            kqRWallFunction;
-        value           uniform 0;
+        value           uniform $kinf;
     }
-
+    outlet
+    {
+        type            inletOutlet;
+        inletValue      uniform $kinf;
+        value           uniform $kinf;
+    }
+    exhaust
+    {
+        type            fixedValue;
+        value           uniform $kExhaust;
+    }
 }
-
-
-// ************************************************************************* //

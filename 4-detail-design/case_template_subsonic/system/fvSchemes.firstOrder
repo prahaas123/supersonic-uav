@@ -1,0 +1,70 @@
+/*--------------------------------*- C++ -*----------------------------------*\
+| =========                 |                                                 |
+| \\      /  F ield         | OpenFOAM: The Open Source CFD Toolbox           |
+|  \\    /   O peration     | Version:  v2312                                 |
+|   \\  /    A nd           | Website:  www.openfoam.com                      |
+|    \\/     M anipulation  |                                                 |
+\*---------------------------------------------------------------------------*/
+FoamFile
+{
+    version     2.0;
+    format      ascii;
+    class       dictionary;
+    object      fvSchemes;
+}
+// * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * //
+
+// FIRST-ORDER START: subsonic_detail_run.py runs a freestream start with these upwind schemes for
+// FIRST_ORDER_ITERS iterations, then copies the second-order system/fvSchemes over them (re-read through
+// runTimeModifiable). With second order from the start, the hot start-up slug of the 2250 K exhaust grew
+// into an oscillation in the coarse far-plume cells and diverged by iteration ~200 (Mach 0.9, local test
+// mesh, Nov 2026); with upwind the same case converged smoothly.
+ddtSchemes
+{
+    default         steadyState;
+}
+
+gradSchemes
+{
+    default         Gauss linear;
+    limited         cellLimited Gauss linear 1;
+    grad(U)         $limited;
+    grad(h)         $limited;
+    grad(k)         $limited;
+    grad(omega)     $limited;
+}
+
+divSchemes
+{
+    default         none;
+    div(phi,U)      bounded Gauss upwind;
+    energy          bounded Gauss upwind;
+    div(phi,h)      $energy;
+    div(phi,K)      $energy;
+    div(phi,k)      bounded Gauss upwind;
+    div(phi,omega)  bounded Gauss upwind;
+    div(phid,p)     Gauss upwind;                    // transonic pressure equation
+    div(((rho*nuEff)*dev2(T(grad(U))))) Gauss linear;
+}
+
+laplacianSchemes
+{
+    default         Gauss linear limited corrected 0.5;
+}
+
+interpolationSchemes
+{
+    default         linear;
+}
+
+snGradSchemes
+{
+    default         limited corrected 0.5;
+}
+
+wallDist
+{
+    method meshWave;
+}
+
+// ************************************************************************* //

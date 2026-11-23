@@ -1,0 +1,24 @@
+// Written by subsonic_detail_run.py for every case (values below: Mach 0.5, alpha 0, beta 0, 15 km)
+
+// Freestream
+Uinf            (147.534 -0 0);
+pInf            12044.6;
+Tinf            216.65;
+rhoInf          0.193675;
+kinf            3.26494;
+omegaInf        4448.04;
+nutInf          0.000734018;
+Prt             0.9;
+
+// Extension outlet backflow (back pressure: include/outletPressure)
+T0inf           227.482;
+
+// Exhaust (mass-flow inlet, half model: half the mass flow)
+mdotExhaust     0.0687266;
+T0Exhaust       2250;
+gammaExhaust    1.4;
+UExhaust        (804.208 0 0);
+TExhaust        1928.13;
+rhoExhaust      0.0217619;
+kExhaust        97.0125;
+omegaExhaust    3486.42;

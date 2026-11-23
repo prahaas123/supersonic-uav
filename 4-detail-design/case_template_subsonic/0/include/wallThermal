@@ -1,0 +1,2 @@
+// Written by subsonic_detail_run.py: zeroGradient = adiabatic, fixedValue = isothermal wall
+type            zeroGradient;

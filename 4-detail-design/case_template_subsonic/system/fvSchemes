@@ -1,7 +1,7 @@
 /*--------------------------------*- C++ -*----------------------------------*\
 | =========                 |                                                 |
 | \\      /  F ield         | OpenFOAM: The Open Source CFD Toolbox           |
-|  \\    /   O peration     | Version:  v2306                                 |
+|  \\    /   O peration     | Version:  v2312                                 |
 |   \\  /    A nd           | Website:  www.openfoam.com                      |
 |    \\/     M anipulation  |                                                 |
 \*---------------------------------------------------------------------------*/
@@ -14,6 +14,10 @@ FoamFile
 }
 // * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * //
 
+// Steady, pressure-based (rhoSimpleFoam). Second-order TVD (limitedLinear) convection: bounded at the sharp
+// 1900 K / 870 m/s shear layer at the exhaust lip, where linearUpwind made new temperature extrema
+// (350 -> 1400 K in 10 iterations) and the residuals grew (Mach 0.9, local test mesh, Nov 2026).
+// A freestream start runs first on system/fvSchemes.firstOrder (subsonic_detail_run.py, FIRST_ORDER_ITERS).
 ddtSchemes
 {
     default         steadyState;
@@ -22,21 +26,29 @@ ddtSchemes
 gradSchemes
 {
     default         Gauss linear;
+    limited         cellLimited Gauss linear 1;
+    grad(U)         $limited;
+    grad(h)         $limited;
+    grad(k)         $limited;
+    grad(omega)     $limited;
 }
 
 divSchemes
 {
-    default                       none;
-    div(phi,U)                    bounded Gauss linearUpwindV grad(U);
-    div(phi,k)                    bounded Gauss limitedLinear 1;
-    div(phi,omega)                bounded Gauss limitedLinear 1;
-    div((nuEff*dev2(T(grad(U))))) Gauss linear;
-    div(nonlinearStress)          Gauss linear;
+    default         none;
+    div(phi,U)      bounded Gauss limitedLinearV 1;
+    energy          bounded Gauss limitedLinear 1;
+    div(phi,h)      $energy;
+    div(phi,K)      $energy;
+    div(phi,k)      bounded Gauss limitedLinear 1;
+    div(phi,omega)  bounded Gauss limitedLinear 1;
+    div(phid,p)     Gauss upwind;                    // transonic pressure equation
+    div(((rho*nuEff)*dev2(T(grad(U))))) Gauss linear;
 }
 
 laplacianSchemes
 {
-    default         Gauss linear corrected;
+    default         Gauss linear limited corrected 0.5;
 }
 
 interpolationSchemes
@@ -46,13 +58,12 @@ interpolationSchemes
 
 snGradSchemes
 {
-    default         corrected;
+    default         limited corrected 0.5;
 }
 
 wallDist
 {
-    method          meshWave;
+    method meshWave;
 }
-
 
 // ************************************************************************* //

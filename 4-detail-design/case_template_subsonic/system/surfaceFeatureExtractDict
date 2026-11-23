@@ -1,8 +1,8 @@
 /*--------------------------------*- C++ -*----------------------------------*\
 | =========                 |                                                 |
 | \\      /  F ield         | OpenFOAM: The Open Source CFD Toolbox           |
-|  \\    /   O peration     | Version:  v2306                                 |
-|   \\  /    A nd           | Website:  www.openfoam.com                      |
+|  \\    /   O peration     | Version: v2312                                  |
+|   \\  /    A nd           | Web: www.openfoam.com                           |
 |    \\/     M anipulation  |                                                 |
 \*---------------------------------------------------------------------------*/
 FoamFile
@@ -12,12 +12,24 @@ FoamFile
     class       dictionary;
     object      surfaceFeatureExtractDict;
 }
-// * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * //
+// ============================================================================
 
+// Sharp edges (> 30 deg between faces, as in the STAR-CCM+ import) and the edges between the named
+// regions (lip / duct / engine face / exhaust boundaries)
 uav.stl
 {
     extractionMethod    extractFromSurface;
-    extractFeaturesByAngle true;
-    includedAngle       150;
+
+    extractFromSurfaceCoeffs
+    {
+        includedAngle   150;
+    }
+
+    subsetFeatures
+    {
+        nonManifoldEdges    yes;
+        openEdges           yes;
+    }
+
     writeObj            yes;
 }

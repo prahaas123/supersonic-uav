@@ -1,8 +1,8 @@
 /*--------------------------------*- C++ -*----------------------------------*\
 | =========                 |                                                 |
 | \\      /  F ield         | OpenFOAM: The Open Source CFD Toolbox           |
-|  \\    /   O peration     | Version:  v2306                                 |
-|   \\  /    A nd           | Website:  www.openfoam.com                      |
+|  \\    /   O peration     | Version: v2312                                  |
+|   \\  /    A nd           | Web: www.openfoam.com                           |
 |    \\/     M anipulation  |                                                 |
 \*---------------------------------------------------------------------------*/
 FoamFile
@@ -12,54 +12,27 @@ FoamFile
     class       volScalarField;
     object      nut;
 }
-// * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * //
+// ============================================================================
 
+#include        "include/flowVars"
 dimensions      [0 2 -1 0 0 0 0];
-
-internalField   uniform 1e-05;
+internalField   uniform $nutInf;
 
 boundaryField
 {
-    #includeEtc "caseDicts/setConstraintTypes"
-
-    
-    xMin
+    "(farfield|outlet|exhaust)"
     {
         type            calculated;
-        value           uniform 0;
+        value           uniform $nutInf;
     }
-    xMax
+    symmetry
     {
-        type            calculated;
-        value           uniform 0;
+        type            symmetry;
     }
-    yMin
+    // Spalding's law covers the viscous sublayer to the log layer (all-y+ treatment)
+    "(airframe|inlet_lip|inlet_duct|extension)"
     {
-        type            calculated;
+        type            nutUSpaldingWallFunction;
         value           uniform 0;
     }
-    yMax
-    {
-        type            calculated;
-        value           uniform 0;
-    }
-    zMin
-    {
-        type            calculated;
-        value           uniform 0;
-    }
-    zMax
-    {
-        type            calculated;
-        value           uniform 0;
-    }
-    uav
-    {
-        type            nutkWallFunction;
-        value           uniform 0;
-    }
-
 }
-
-
-// ************************************************************************* //

@@ -1,0 +1,3 @@
+// Written by subsonic_detail_run.py: zeroGradient for a subsonic exit (convergent nozzle, the exit pressure
+// follows the ambient), fixedValue at the sonic pressure when the nozzle chokes
+type            zeroGradient;

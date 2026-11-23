@@ -1,0 +1,8 @@
+// Written by subsonic_detail_run.py (example values)
+tEnd            20000;
+tWrite          1000;
+monitorInterval 10;
+cg              (0.78 0 0);
+rhoInfRef       0.193675;
+efPoint         (1.0345 0 0);
+efBounds        (1.0145 -0.044 -0.044) (1.0545 0.044 0.044);

@@ -1,0 +1,6 @@
+// Written by subsonic_detail_run.py: engine back pressure at the extension outlet (example values: 1D at
+// the design engine-face Mach 0.442 with recovery 0.97, ramped down over 500 iterations on a
+// freestream start)
+type            uniformFixedValue;
+uniformValue    table ((0 13511.096) (500 12120.363));
+value           uniform 12120.363;

@@ -1,7 +1,7 @@
 /*--------------------------------*- C++ -*----------------------------------*\
 | =========                 |                                                 |
 | \\      /  F ield         | OpenFOAM: The Open Source CFD Toolbox           |
-|  \\    /   O peration     | Version:  v2306                                 |
+|  \\    /   O peration     | Version:  v2312                                 |
 |   \\  /    A nd           | Website:  www.openfoam.com                      |
 |    \\/     M anipulation  |                                                 |
 \*---------------------------------------------------------------------------*/
@@ -10,12 +10,15 @@ FoamFile
     version     2.0;
     format      ascii;
     class       dictionary;
-    object      transportProperties;
+    object      fvOptions;
 }
 // * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * //
 
-transportModel  Newtonian;
-
-nu              1.5e-05;
-
-// ************************************************************************* //
+limitT
+{
+    type            limitTemperature;
+    active          true;
+    selectionMode   all;
+    min             110.0;
+    max             4000.0;
+}

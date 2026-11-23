@@ -1,8 +1,8 @@
 /*--------------------------------*- C++ -*----------------------------------*\
 | =========                 |                                                 |
 | \\      /  F ield         | OpenFOAM: The Open Source CFD Toolbox           |
-|  \\    /   O peration     | Version:  v2306                                 |
-|   \\  /    A nd           | Website:  www.openfoam.com                      |
+|  \\    /   O peration     | Version: v2312                                  |
+|   \\  /    A nd           | Web: www.openfoam.com                           |
 |    \\/     M anipulation  |                                                 |
 \*---------------------------------------------------------------------------*/
 FoamFile
@@ -12,46 +12,44 @@ FoamFile
     class       volVectorField;
     object      U;
 }
-// * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * //
+// ============================================================================
 
-#include        "include/initialConditions"
-
+#include        "include/flowVars"
 dimensions      [0 1 -1 0 0 0 0];
-
-internalField   uniform $flowVelocity;
+internalField   uniform $Uinf;
 
 boundaryField
 {
-    #includeEtc "caseDicts/setConstraintTypes"
-    xMin
+    // Free stream on every outer face (Mach, p, T and flow direction from alpha / beta)
+    farfield
     {
         type            freestreamVelocity;
-        freestreamValue $internalField;
+        freestreamValue uniform $Uinf;
+        value           uniform $Uinf;
     }
-    xMax
+    symmetry
     {
-        type            freestreamVelocity;
-        freestreamValue $internalField;
+        type            symmetry;
     }
-    yMin
-    {
-        type            slip;
-    }
-    yMax
-    {
-        type            slip;
-    }
-    zMin
-    {
-        type            slip;
-    }
-    zMax
-    {
-        type            slip;
-    }
-    uav
+    "(airframe|inlet_lip|inlet_duct|extension)"
     {
         type            noSlip;
     }
-
+    // Outlet of the straight extension after the engine face: velocity follows from the fixed back
+    // pressure, zero velocity on any backflow face (as 3-inlet-design/case_template_inlet)
+    outlet
+    {
+        type            inletOutlet;
+        inletValue      uniform (0 0 0);
+        value           uniform (0 0 0);
+    }
+    // RDE exhaust: mass-flow inlet normal to the base (air + fuel)
+    exhaust
+    {
+        type            flowRateInletVelocity;
+        massFlowRate    $mdotExhaust;
+        rho             rho;
+        rhoInlet        $rhoExhaust;
+        value           uniform $UExhaust;
+    }
 }

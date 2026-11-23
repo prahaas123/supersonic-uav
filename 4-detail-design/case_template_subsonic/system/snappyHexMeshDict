@@ -1,6 +1,9 @@
-/*--------------------------------*- C#  -*----------------------------------*\
-  =========                 |
-  \\      /  Field         | OpenFOAM: The Open Source CFD Toolbox
+/*--------------------------------*- C++ -*----------------------------------*\
+| =========                 |                                                 |
+| \\      /  F ield         | OpenFOAM: The Open Source CFD Toolbox           |
+|  \\    /   O peration     | Version: v2312                                  |
+|   \\  /    A nd           | Web: www.openfoam.com                           |
+|    \\/     M anipulation  |                                                 |
 \*---------------------------------------------------------------------------*/
 FoamFile
 {
@@ -9,61 +12,82 @@ FoamFile
     class       dictionary;
     object      snappyHexMeshDict;
 }
-// * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * //
+// ============================================================================
+
+// Refinement levels, layer sizes and the outside point, written by subsonic_detail_run.py.
+// Level n = BASE_SIZE / 2^n (0.4 m base: 3 = 50 mm, 4 = 25, 5 = 12.5, 6 = 6.25, 7 = 3.125,
+// 8 = 1.5625, 9 = 0.78125, 10 = 0.390625 mm)
+#include "include/meshVars"
 
 castellatedMesh true;
 snap            true;
 addLayers       true;
 
+mergeTolerance 1e-6;
+
 geometry
 {
+    // One STL solid per named CAD face -> one patch each
     uav.stl
     {
         type triSurfaceMesh;
         name uav;
+        regions
+        {
+            airframe    { name airframe; }
+            inlet_lip   { name inlet_lip; }
+            inlet_duct  { name inlet_duct; }
+            extension   { name extension; }
+            outlet      { name outlet; }
+            exhaust     { name exhaust; }
+        }
     }
-    wakeRegion
-    {
-        type searchableBox;
-        min (0.1 -0.4 -0.075); 
-        max (1.1  0.4  0.075);
-    }
+
+    // Refinement boxes (searchableBox entries)
+    #include "include/refinementBoxes"
 }
 
 castellatedMeshControls
 {
-    maxLocalCells 1000000;
-    maxGlobalCells 10000000;
-    minRefinementCells 10;
-    maxLoadUnbalance 0.10;
-    nCellsBetweenLevels 3;
+    maxLocalCells       2000000;
+    maxGlobalCells      150000000;
+    minRefinementCells  10;
+    maxLoadUnbalance    0.10;
+    nCellsBetweenLevels $nCellsBetweenLevels;
 
     features
     (
-        { file "uav.eMesh"; level 7; }
+        {
+            file "uav.eMesh";
+            level $featureLevel;
+        }
     );
 
     refinementSurfaces
     {
         uav
         {
-            level (8 9);
-            patchInfo { type wall; }
+            level $airframeLevel;
+            regions
+            {
+                airframe    { level $airframeLevel;    patchInfo { type wall; } }
+                inlet_lip   { level $inletLipLevel;    patchInfo { type wall; } }
+                inlet_duct  { level $inletDuctLevel;   patchInfo { type wall; } }
+                extension   { level $inletDuctLevel;   patchInfo { type wall; } }
+                outlet      { level $enginePortsLevel; patchInfo { type patch; } }
+                exhaust     { level $enginePortsLevel; patchInfo { type patch; } }
+            }
         }
     }
 
-    resolveFeatureAngle 30;
+    resolveFeatureAngle $resolveFeatureAngle;
 
     refinementRegions
     {
-        wakeRegion
-        {
-            mode inside;
-            levels ((1e15 6)); 
-        }
+        #include "include/refinementRegions"
     }
 
-    locationInMesh (0.0 1.0 0.5); // Must be OUTSIDE the wing but INSIDE the blockMesh
+    locationInMesh $locationInMesh;
     allowFreeStandingZoneFaces true;
 }
 
@@ -74,28 +98,42 @@ snapControls
     nSolveIter 30;
     nRelaxIter 5;
     nFeatureSnapIter 10;
-    implicitFeatureSnap true;
-    explicitFeatureSnap false;
-    multiRegionFeatureSnap false;
+    implicitFeatureSnap false;
+    explicitFeatureSnap true;
+    multiRegionFeatureSnap true;
 }
 
+// Prism layers: final layer thickness and growth ratio relative to the local surface cell size, so
+// the stack stays ~1 cell thick on every refinement level. Layer counts come from the run script
+// (currently airframe only); thin layers at the lip and duct entrance set the explicit time step
 addLayersControls
 {
     relativeSizes true;
     layers
     {
-        uav
+        airframe
         {
-            nSurfaceLayers 8;
+            nSurfaceLayers      $nLayers;
+        }
+        "(inlet_duct|extension)"
+        {
+            nSurfaceLayers      $nLayersDuct;
+        }
+        inlet_lip
+        {
+            nSurfaceLayers      $nLayersLip;
         }
     }
-    expansionRatio 1.2;
-    finalLayerThickness 0.5;
-    minThickness 0.05;
+
+    thicknessModel finalAndExpansion;
+    expansionRatio $expansionRatio;
+    finalLayerThickness $finalLayerThickness;
+    minThickness $minLayerThickness;
     nGrow 0;
-    featureAngle 80;
+    featureAngle 130;
     slipFeatureAngle 30;
-    nRelaxIter 5;
+    nRelaxIter 10;           // more displacement-scaling attempts before a point's layers are dropped
+    nRelaxedIter 20;         // after 20 layer iterations use the relaxed quality criteria
     nSmoothSurfaceNormals 1;
     nSmoothNormals 3;
     nSmoothThickness 10;
@@ -109,21 +147,26 @@ addLayersControls
 meshQualityControls
 {
     maxNonOrtho 65;
-    maxBoundarySkewness 20;
+    maxBoundarySkewness 6;
     maxInternalSkewness 4;
     maxConcave 80;
     minFlatness 0.5;
     minVol 1e-13;
-    minTetQuality 1e-15;
+    minTetQuality 1e-30;
     minArea -1;
-    minTwist 0.05;
+    minTwist 0.02;
     minDeterminant 0.001;
-    minFaceWeight 0.02;
+    minFaceWeight 0.05;
     minVolRatio 0.01;
-    minTriangleTwist -1;
+    triangleTwist true;
     nSmoothScale 4;
     errorReduction 0.75;
+    minTriangleTwist -1;
+
+    relaxed
+    {
+        maxNonOrtho 75;
+    }
 }
 
 debug 0;
-mergeTolerance 1e-6;

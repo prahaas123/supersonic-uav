@@ -1,7 +1,7 @@
 /*--------------------------------*- C++ -*----------------------------------*\
 | =========                 |                                                 |
 | \\      /  F ield         | OpenFOAM: The Open Source CFD Toolbox           |
-|  \\    /   O peration     | Version:  v2306                                 |
+|  \\    /   O peration     | Version:  v2312                                 |
 |   \\  /    A nd           | Website:  www.openfoam.com                      |
 |    \\/     M anipulation  |                                                 |
 \*---------------------------------------------------------------------------*/
@@ -20,49 +20,54 @@ solvers
     {
         solver          GAMG;
         smoother        GaussSeidel;
-        tolerance       1e-7;
-        relTol          0.1;
+        tolerance       1e-10;
+        relTol          0.05;
     }
 
-    Phi
-    {
-        $p;
-    }
-
-    "(U|k|omega|f)"
+    "(U|h|k|omega)"
     {
         solver          smoothSolver;
-        smoother        GaussSeidel;
-        tolerance       1e-6;
+        smoother        symGaussSeidel;
+        tolerance       1e-10;
         relTol          0.1;
     }
 }
 
 SIMPLE
 {
-    nNonOrthogonalCorrectors 2;
-    consistent yes;
-
-    residualControl
-    {
-        p               1e-5;
-        U               1e-6;
-        "(k|omega|f)"   1e-6;
-    }
-}
-
-potentialFlow
-{
-    nNonOrthogonalCorrectors 10;
+    nNonOrthogonalCorrectors 1;
+    // SIMPLEC with the compressible (transonic) pressure equation: local supersonic pockets at Mach 0.8-0.9
+    // and the choked exhaust need the convective p term, and it reduces to the usual form at low Mach.
+    consistent      yes;
+    transonic       yes;
+    // p kept between 0.1 x the lowest and 3 x the highest fixed boundary pressure
+    pMinFactor      0.1;
+    pMaxFactor      3;
+    // no residualControl: subsonic_detail_run.py stops on the asymptotes of the forces and the engine mass flow
 }
 
 relaxationFactors
 {
+    fields
+    {
+        p               1;            // SIMPLEC needs no explicit p relaxation
+    }
     equations
     {
-        U               0.9;
-        ".*"            0.4;
+        // p listed so that pEqn.relax() keeps the transonic p matrix diagonally dominant
+        // (3-inlet-design: without it the first p solve hit NaN)
+        p               1;
+        // 0.5: at 0.7 a pressure disturbance grew along the hot exhaust plume and diverged by
+        // iteration 76 (Mach 0.9, local test mesh, Nov 2026)
+        U               0.5;
+        h               0.5;
+        "(k|omega)"     0.5;
     }
+}
+
+wallDist
+{
+    method meshWave;
 }
 
 // ************************************************************************* //

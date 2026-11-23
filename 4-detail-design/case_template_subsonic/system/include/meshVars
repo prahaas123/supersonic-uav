@@ -1,0 +1,15 @@
+// Written by subsonic_detail_run.py (example values)
+nCellsBetweenLevels 3;
+featureLevel        8;
+resolveFeatureAngle 30;
+airframeLevel       (7 8);
+inletLipLevel       (10 10);
+inletDuctLevel      (8 9);
+enginePortsLevel    (8 9);
+nLayers             5;
+nLayersDuct         4;
+nLayersLip          0;
+expansionRatio      1.2;
+finalLayerThickness 0.3;
+minLayerThickness   0.5;
+locationInMesh      (-4.0123 2.0123 2.0123);

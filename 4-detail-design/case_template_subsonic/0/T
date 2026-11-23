@@ -1,0 +1,50 @@
+/*--------------------------------*- C++ -*----------------------------------*\
+| =========                 |                                                 |
+| \\      /  F ield         | OpenFOAM: The Open Source CFD Toolbox           |
+|  \\    /   O peration     | Version: v2312                                  |
+|   \\  /    A nd           | Web: www.openfoam.com                           |
+|    \\/     M anipulation  |                                                 |
+\*---------------------------------------------------------------------------*/
+FoamFile
+{
+    version     2.0;
+    format      ascii;
+    class       volScalarField;
+    object      T;
+}
+// ============================================================================
+
+#include        "include/flowVars"
+dimensions      [0 0 0 1 0 0 0];
+internalField   uniform $Tinf;
+
+boundaryField
+{
+    farfield
+    {
+        type            freestream;
+        freestreamValue uniform $Tinf;
+    }
+    symmetry
+    {
+        type            symmetry;
+    }
+    "(airframe|inlet_lip|inlet_duct|extension)"
+    {
+        #include        "include/wallThermal"
+    }
+    // Backflow (if any) enters at the freestream total temperature
+    outlet
+    {
+        type            inletOutlet;
+        inletValue      uniform $T0inf;
+        value           uniform $Tinf;
+    }
+    exhaust
+    {
+        type            totalTemperature;
+        T0              uniform $T0Exhaust;
+        gamma           $gammaExhaust;
+        value           uniform $TExhaust;
+    }
+}

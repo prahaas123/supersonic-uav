@@ -1,9 +1,9 @@
-/*--------------------------------*- C# -*------ ----------------------------*\
-  =========                 |
-  \\      /  F ield         | OpenFOAM: The Open Source CFD Toolbox
-   \\    /   O peration     | Website:  www.openfoam.com
-    \\  /    A nd           | Version:  v2312
-     \\/     M anipulation  |
+/*--------------------------------*- C++ -*----------------------------------*\
+| =========                 |                                                 |
+| \\      /  F ield         | OpenFOAM: The Open Source CFD Toolbox           |
+|  \\    /   O peration     | Version: v2312                                  |
+|   \\  /    A nd           | Web: www.openfoam.com                           |
+|    \\/     M anipulation  |                                                 |
 \*---------------------------------------------------------------------------*/
 FoamFile
 {
@@ -12,36 +12,9 @@ FoamFile
     class       dictionary;
     object      blockMeshDict;
 }
-// * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * //
 
-scale   1;
+scale 1;
 
-vertices
-(
-    (-10 -10 -10)   //  0
-    ( 20 -10 -10)   //  1
-    ( 20  10 -10)   //  2
-    (-10  10 -10)   //  3
-    (-10 -10  10)   //  4
-    ( 20 -10  10)   //  5
-    ( 20  10  10)   //  6
-    (-10  10  10)   //  7
-);
-
-blocks
-(
-    hex (0 1 2 3 4 5 6 7) (60 40 20) simpleGrading (1 1 1)
-);
-
-edges
-();
-
-boundary
-(
-    xMin { type patch; faces ((0 4 7 3)); }
-    xMax { type patch; faces ((1 2 6 5)); }
-    yMin { type patch; faces ((0 1 5 4)); }
-    yMax { type patch; faces ((3 7 6 2)); }
-    zMin { type patch; faces ((0 3 2 1)); }
-    zMax { type patch; faces ((4 5 6 7)); }
-);
+// Background box of BASE_SIZE cubes: vertices, blocks and boundary (farfield, and symmetry at y = 0
+// for a half model) are written by subsonic_detail_run.py
+#include "include/domain"
