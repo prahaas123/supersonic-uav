@@ -18,7 +18,9 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 MACH      = 1.5
 ALPHA_DEG = 0.0                  # angle of attack [deg]
 BETA_DEG  = 0.0                  # sideslip [deg], > 0 = wind from starboard
-CG        = (0.826, 0.0, 0.0)    # moment reference point / CG (x, y, z) [m], body axes
+CG        = (0.78, 0.0, 0.0)     # moment reference point / CG (x, y, z) [m], body axes
+# Mach, alpha, beta, the back pressure (P_BACK) and the initial field (INIT_FROM) can also be given on the
+# command line, e.g.  python3 supersonic_detail_run.py --mach 1.2 --alpha 2 --p-back capture
 
 # =====================================================================================================
 # ASSUMED VALUES
@@ -40,7 +42,7 @@ B_REF = 1.107                    # span [m]
 
 # --- engine (README section 1)
 MDOT_AIR   = 0.2635              # engine-face air mass flow target [kg/s] (a result, set by the back pressure)
-MDOT_FUEL  = 0.0216              # [kg/s], exhaust mass flow = MDOT_AIR + MDOT_FUEL
+MDOT_FUEL  = 0.0216              # [kg/s] at MDOT_AIR; exhaust = air + fuel at this fuel-air ratio
 T0_EXHAUST = 2250.0              # exhaust total temperature [K] (assumed)
 P_EXHAUST  = 15065.0             # exhaust static pressure [Pa] (from the 343.75 N thrust estimate)
 EXHAUST_TURB_INTENSITY = 0.01
@@ -51,7 +53,17 @@ EXHAUST_VISC_RATIO     = 10.0
 #     are results sampled on the engine-face plane (as 3-inlet-design/run_inlet.py)
 PT_RECOVERY_EST = 0.94 * 0.979   # engine-face p0 / p0_inf assumed for the 1D back pressure: 2D external
                                  # compression x S-duct recovery of design 39 (0-results/inlet_dse_results.csv)
-P_BACK          = 35500.0        # [Pa] outlet static pressure; None = 1D value at MDOT_AIR with PT_RECOVERY_EST
+P_BACK          = "capture"      # outlet static pressure: a value [Pa], "capture" (below), or None = 1D value
+                                 # at MDOT_AIR with PT_RECOVERY_EST
+# "capture": the inlet swallows its whole capture stream tube (rho_inf V_inf CAPTURE_AREA), the only state
+# that converges; with spillage (back pressure above critical) the engine-face mass flow cycles without
+# settling (runs/bp32000, bp33000, Nov 2026). The back pressure is the 1D engine-face static pressure at the
+# capture mass flow with recovery K_INSTALL x normal-shock recovery at MACH, lowered by P_BACK_MARGIN so
+# the inlet stays just supercritical. The exhaust carries the capture flow plus fuel at the same fuel-air
+# ratio. Calibrated at Mach 1.5, alpha 0 (runs/bp30000: 30000 Pa, 0.2672 kg/s, recovery 0.7747).
+CAPTURE_AREA    = 0.0031225      # [m2] inlet capture area (0-results/inlet_design_39/metrics.json)
+K_INSTALL       = 0.833          # installed engine-face recovery / normal-shock recovery (0.7747 / 0.9298)
+P_BACK_MARGIN   = 0.03           # fraction below the 1D critical back pressure
 RAMP_ITERS      = 1500           # back pressure ramps down to P_BACK over these iterations (freestream start) ...
 P_START_FRAC    = 0.2            # ... from p0_face - P_START_FRAC * (p0_face - P_BACK)
 MDOT_TARGET_TOL_PCT = 0.5        # engine-face mass flow vs MDOT_AIR, reported only (it is a result)
@@ -118,7 +130,7 @@ NP               = 100           # MPI processes
 # Local time stepping (ddtScheme localEuler): a pseudo-time march to the steady state where every cell
 # takes its own largest stable step, so the ~0.1 mm wall and lip cells do not hold back the 0.4 m
 # far-field cells. OpenFOAM time is the iteration count (deltaT 1).
-MAX_ITERATIONS   = 30000         # cap, ~1.1 s each on 50 cores
+MAX_ITERATIONS   = 30000         # cap, ~1 s each on 100 cores
 WRITE_INTERVAL   = 1000          # [iterations] field writes (the last two are kept)
 MAX_COURANT      = 0.4           # local Courant number of every cell
 MONITOR_INTERVAL = 10            # iterations between monitor samples
@@ -151,21 +163,25 @@ def main():
     flow = flow_conditions(geo, half)
     print_conditions(flow)
 
-    # 1. Mesh, reused while the mesh settings and the geometry are unchanged
+    # 1. Mesh, reused while the mesh settings and the geometry are unchanged. Parallel runs (job array) take
+    #    a lock, so only the first builds a missing mesh and the others wait for it and reuse it.
     mesh_dir = f"./detail_mesh_{'half' if half else 'full'}"
     settings = mesh_settings(half)
-    if read_json(mesh_dir).get("mesh_settings") == settings and os.path.isdir(f"{mesh_dir}/constant/polyMesh"):
-        print(f"[mesh] reusing {mesh_dir}")
-    else:
-        print(f"[mesh] building {mesh_dir} ...")
-        t0 = time.perf_counter()
-        prepare_mesh(mesh_dir, half)
-        if not mesh(mesh_dir):
-            print("Error: meshing failed")
-            return 1
-        write_json(mesh_dir, {"mesh_settings": settings, "mesh_time_s": round(time.perf_counter() - t0, 1),
-                              **mesh_stats(mesh_dir)})
-        print(f"[mesh] done in {time.perf_counter() - t0:.0f} s")
+    import fcntl
+    with open(f"{mesh_dir}.lock", "w") as lock:
+        fcntl.flock(lock, fcntl.LOCK_EX)
+        if read_json(mesh_dir).get("mesh_settings") == settings and os.path.isdir(f"{mesh_dir}/constant/polyMesh"):
+            print(f"[mesh] reusing {mesh_dir}")
+        else:
+            print(f"[mesh] building {mesh_dir} ...")
+            t0 = time.perf_counter()
+            prepare_mesh(mesh_dir, half)
+            if not mesh(mesh_dir):
+                print("Error: meshing failed")
+                return 1
+            write_json(mesh_dir, {"mesh_settings": settings, "mesh_time_s": round(time.perf_counter() - t0, 1),
+                                  **mesh_stats(mesh_dir)})
+            print(f"[mesh] done in {time.perf_counter() - t0:.0f} s")
 
     # 2. Case
     case = f"./detail_M{MACH:g}_a{ALPHA_DEG:g}_b{BETA_DEG:g}"
@@ -255,23 +271,36 @@ def flow_conditions(geo, half):
     a, b = math.radians(ALPHA_DEG), math.radians(BETA_DEG)
     k, omega, nut = turbulence(U, rho, T, FREESTREAM_TURB_INTENSITY, FREESTREAM_VISC_RATIO)
     iso = 1.0 + 0.5 * (GAMMA - 1.0) * MACH ** 2
+    if MACH <= 1.0:
+        raise SystemExit(f"Mach {MACH:g}: the far field of this template is supersonic (Mach > 1 only)")
 
-    # 1D exhaust state (full exhaust area and mass flow)
-    mdot_ex = MDOT_AIR + MDOT_FUEL
+    # 1D engine face -> outlet back pressure. Mass flow and recovery: the capture stream tube with the
+    # installed normal-shock recovery ("capture"), else the target MDOT_AIR with PT_RECOVERY_EST
+    p0_inf, T0_inf = p * iso ** (GAMMA / (GAMMA - 1.0)), T * iso
+    ef = geo["engine_face"]
+    mode = "1d" if P_BACK is None else "capture" if P_BACK == "capture" else "set"
+    if mode == "capture":
+        mdot_air = rho * U * CAPTURE_AREA
+        recovery = K_INSTALL * normal_shock_recovery(MACH)
+    else:
+        mdot_air, recovery = MDOT_AIR, PT_RECOVERY_EST
+    p0_ef = recovery * p0_inf
+    M_ef = subsonic_mach(mdot_air, ef["area"], p0_ef, T0_inf)
+    if M_ef is None:
+        raise SystemExit(f"{mdot_air:.4f} kg/s is above the choked mass flow of the engine face at recovery "
+                         f"{recovery:.4f}")
+    p_ef = p0_ef / (1.0 + 0.5 * (GAMMA - 1.0) * M_ef ** 2) ** (GAMMA / (GAMMA - 1.0))
+    p_back = {"set": float(P_BACK) if mode == "set" else None, "1d": p_ef,
+              "capture": (1.0 - P_BACK_MARGIN) * p_ef}[mode]
+
+    # 1D exhaust state (full exhaust area and mass flow), fuel at the design fuel-air ratio
+    mdot_fuel = MDOT_FUEL * mdot_air / MDOT_AIR
+    mdot_ex = mdot_air + mdot_fuel
     M_ex = exhaust_mach(mdot_ex, geo["area"]["exhaust"], P_EXHAUST, T0_EXHAUST)
     T_ex = T0_EXHAUST / (1.0 + 0.5 * (GAMMA - 1.0) * M_ex ** 2)
     U_ex = M_ex * math.sqrt(GAMMA * R_GAS * T_ex)
     rho_ex = P_EXHAUST / (R_GAS * T_ex)
     k_ex, omega_ex, _ = turbulence(U_ex, rho_ex, T_ex, EXHAUST_TURB_INTENSITY, EXHAUST_VISC_RATIO)
-
-    # 1D engine face at the target mass flow with the assumed recovery -> outlet back pressure
-    p0_inf, T0_inf = p * iso ** (GAMMA / (GAMMA - 1.0)), T * iso
-    ef = geo["engine_face"]
-    p0_ef = PT_RECOVERY_EST * p0_inf
-    M_ef = subsonic_mach(MDOT_AIR, ef["area"], p0_ef, T0_inf)
-    if M_ef is None:
-        raise SystemExit("MDOT_AIR is above the choked mass flow of the engine face with PT_RECOVERY_EST")
-    p_back = P_BACK or p0_ef / (1.0 + 0.5 * (GAMMA - 1.0) * M_ef ** 2) ** (GAMMA / (GAMMA - 1.0))
 
     return dict(
         mach=MACH, alpha_deg=ALPHA_DEG, beta_deg=BETA_DEG, cg=list(CG), altitude_m=ALTITUDE_M,
@@ -281,11 +310,13 @@ def flow_conditions(geo, half):
         U_vec=[U * math.cos(a) * math.cos(b), -U * math.sin(b), U * math.sin(a) * math.cos(b)],
         q_inf=0.5 * GAMMA * p * MACH ** 2, p0_inf=p0_inf, T0_inf=T0_inf,
         k_inf=k, omega_inf=omega, nut_inf=nut,
-        mdot_air=MDOT_AIR, mdot_exhaust=mdot_ex, T0_exhaust=T0_EXHAUST, p_exhaust=P_EXHAUST,
+        mdot_air=mdot_air, mdot_fuel=mdot_fuel, mdot_exhaust=mdot_ex, T0_exhaust=T0_EXHAUST, p_exhaust=P_EXHAUST,
         engine_face_area=ef["area"], engine_face_x=ef["x"], engine_face_centre=ef["centre"],
-        engine_face_radius=ef["radius"], outlet_x=ef["x_outlet"], pt_recovery_est=PT_RECOVERY_EST,
-        mach_engine_face_1d=M_ef,
-        p_back=p_back, p_back_set=P_BACK is not None, p_back_start=p0_ef - P_START_FRAC * (p0_ef - p_back), ramp_iters=RAMP_ITERS,
+        engine_face_radius=ef["radius"], outlet_x=ef["x_outlet"], pt_recovery_est=recovery,
+        mach_engine_face_1d=M_ef, p_engine_face_1d=p_ef,
+        p_back=p_back, p_back_mode=mode, p_back_set=mode != "1d",
+        capture_area=CAPTURE_AREA, k_install=K_INSTALL, p_back_margin=P_BACK_MARGIN,
+        p_back_start=p0_ef - P_START_FRAC * (p0_ef - p_back), ramp_iters=RAMP_ITERS,
         exhaust_mach_1d=M_ex, exhaust_T_1d=T_ex, exhaust_U_1d=U_ex, exhaust_rho_1d=rho_ex,
         exhaust_supersonic=M_ex >= 1.0, exhaust_U_vec=[U_ex * c for c in geo["normal"]["exhaust"]],
         exhaust_thrust_1d=mdot_ex * U_ex + (P_EXHAUST - p) * geo["area"]["exhaust"],
@@ -298,13 +329,26 @@ def print_conditions(f):
     print(f"  {f['altitude_m'] / 1000:g} km ISA: p {f['p_inf']:.1f} Pa, T {f['T_inf']:.2f} K, "
           f"rho {f['rho_inf']:.5f} kg/m3, V {f['V_inf']:.1f} m/s, q {f['q_inf']:.0f} Pa, p0 {f['p0_inf']:.0f} Pa")
     print(f"  engine face x {f['engine_face_x']:.4f} m, {f['engine_face_area'] * 1e4:.2f} cm2 | outlet back pressure "
-          f"{f['p_back']:.0f} Pa " + ("(P_BACK) | 1D design point" if f["p_back_set"] else "(1D") +
-          f": {f['mdot_air']:g} kg/s, Mach {f['mach_engine_face_1d']:.3f} with recovery "
-          f"{f['pt_recovery_est']:.4f}" + ("" if f["p_back_set"] else ")"))
+          f"{f['p_back']:.0f} Pa ({back_pressure_source(f)})")
+    print(f"  1D engine face: {f['mdot_air']:.4f} kg/s, recovery {f['pt_recovery_est']:.4f} -> Mach "
+          f"{f['mach_engine_face_1d']:.3f}, p {f['p_engine_face_1d']:.0f} Pa")
     print(f"  exhaust {f['mdot_exhaust']:g} kg/s, T0 {f['T0_exhaust']:g} K, p {f['p_exhaust']:g} Pa -> 1D Mach "
           f"{f['exhaust_mach_1d']:.3f}, U {f['exhaust_U_1d']:.0f} m/s, gross thrust {f['exhaust_thrust_1d']:.1f} N")
     if not f["exhaust_supersonic"]:
         print("  WARNING: the 1D exhaust is subsonic, its static pressure is left free (zeroGradient)")
+
+def back_pressure_source(f):
+    mode = f.get("p_back_mode", "set" if f.get("p_back_set") else "1d")    # older metrics.json: no mode
+    if mode == "capture":
+        return (f"capture: 1D at the capture flow, recovery K_INSTALL {f['k_install']:g} x normal shock, "
+                f"{100 * f['p_back_margin']:g} % below")
+    return "set by P_BACK" if mode == "set" else f"1D at MDOT_AIR with PT_RECOVERY_EST {f['pt_recovery_est']:.4f}"
+
+def normal_shock_recovery(M):
+    """Total-pressure ratio across a normal shock at Mach M (> 1)."""
+    g = GAMMA
+    return (((g + 1.0) * M * M / ((g - 1.0) * M * M + 2.0)) ** (g / (g - 1.0))
+            * ((g + 1.0) / (2.0 * g * M * M - (g - 1.0))) ** (1.0 / (g - 1.0)))
 
 # =====================================================================================================
 # Geometry
@@ -633,6 +677,8 @@ def find_init_source(case, mesh_dir):
         if os.path.abspath(src) == os.path.abspath(case) or mesh_signature(src) != sig or not latest_time(src):
             continue
         m = read_json(src)
+        if INIT_FROM == "auto" and m.get("stop_reason") not in ("stopping_criteria", "max_iterations", "time_limit"):
+            continue        # still running (a parallel job) or failed
         f = m.get("flow", {})
         d = (10.0 * abs(f.get("mach", math.inf) - MACH) + abs(f.get("alpha_deg", math.inf) - ALPHA_DEG)
              + abs(f.get("beta_deg", math.inf) - BETA_DEG))
@@ -935,12 +981,18 @@ def format_summary(m):
               f"{r['Fx_shear']:10.3f} {r['Fz_total']:10.3f}" for r in m["breakdown"]]
     if "p_back" in f and "mdot_engine_face" in rep:
         ratio = rep["mdot_engine_face"] / f["mdot_air"]
-        fixed = f.get("p_back_set", False)
+        capture = f.get("p_back_mode") == "capture"
         lines += ["", "== Engine face (back pressure fixed at the extension outlet, mass flow a result) ==",
-                  f"  outlet back pressure {f['p_back']:.0f} Pa " + ("(set by P_BACK)" if fixed else
-                                                                      f"(1D with PT_RECOVERY_EST {f['pt_recovery_est']:.4f})"),
-                  f"  mass flow {rep['mdot_engine_face']:.4f} kg/s, target {f['mdot_air']:.4f} ({100 * (ratio - 1):+.2f} %)"]
-        if abs(ratio - 1.0) * 100.0 > MDOT_TARGET_TOL_PCT and not fixed:
+                  f"  outlet back pressure {f['p_back']:.0f} Pa ({back_pressure_source(f)})",
+                  f"  mass flow {rep['mdot_engine_face']:.4f} kg/s, {'capture flow' if capture else 'target'} "
+                  f"{f['mdot_air']:.4f} ({100 * (ratio - 1):+.2f} %)"]
+        if capture:
+            lines.append(f"  recovery {rep['PressureRecovery_engine_face']:.4f} (1D estimate {f['pt_recovery_est']:.4f}); "
+                         + ("full capture: K_INSTALL = "
+                            f"{rep['PressureRecovery_engine_face'] / normal_shock_recovery(f['mach']):.4f} at this condition"
+                            if ratio > 0.99 else "SPILLING: the back pressure is above critical, lower P_BACK_MARGIN "
+                            "or K_INSTALL"))
+        if abs(ratio - 1.0) * 100.0 > MDOT_TARGET_TOL_PCT and not f.get("p_back_set", False):
             lines.append(f"  OFF TARGET: try PT_RECOVERY_EST = {rep['PressureRecovery_engine_face']:.4f} "
                          "(the engine-face recovery of this run)")
     post = m.get("post")
@@ -958,5 +1010,27 @@ def format_summary(m):
     lines += [bar, f"  CONVERGED (stopping criteria): {m['converged']}", bar, ""]
     return "\n".join(lines)
 
+def parse_args(argv):
+    """Command-line overrides of the INPUTS (anything not given keeps its value above)."""
+    import argparse
+    ap = argparse.ArgumentParser(description="Detail supersonic run (rhoCentralFoam) of uav.stl")
+    ap.add_argument("--mach", type=float, help=f"freestream Mach number, > 1 (default {MACH:g})")
+    ap.add_argument("--alpha", type=float, help=f"angle of attack [deg] (default {ALPHA_DEG:g})")
+    ap.add_argument("--beta", type=float, help=f"sideslip [deg] (default {BETA_DEG:g})")
+    ap.add_argument("--p-back", help=f"outlet back pressure: a value [Pa], 'capture' or '1d' (default {P_BACK})")
+    ap.add_argument("--init-from", help="initial field: 'auto', 'none' or a finished case directory "
+                                        f"(default {INIT_FROM})")
+    a = ap.parse_args(argv)
+    g = globals()
+    for opt, name in (("mach", "MACH"), ("alpha", "ALPHA_DEG"), ("beta", "BETA_DEG")):
+        if getattr(a, opt) is not None:
+            g[name] = getattr(a, opt)
+    if a.p_back is not None:
+        v = a.p_back.lower()
+        g["P_BACK"] = "capture" if v == "capture" else None if v == "1d" else float(v)
+    if a.init_from is not None:
+        g["INIT_FROM"] = None if a.init_from.lower() == "none" else a.init_from
+
 if __name__ == "__main__":
+    parse_args(sys.argv[1:])
     sys.exit(main())
