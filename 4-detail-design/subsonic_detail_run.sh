@@ -9,7 +9,7 @@
 #SBATCH --nodes=1
 #SBATCH --ntasks-per-node=100
 #SBATCH --cpus-per-task=1
-#SBATCH --mem=50G
+#SBATCH --mem=150G
 #SBATCH --output=subsonic_detail_run_%a.log
 #SBATCH --open-mode=append
 #SBATCH --mail-user=kprahaask@gmail.com

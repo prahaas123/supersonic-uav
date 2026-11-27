@@ -38,7 +38,7 @@ runTimeModifiable true;
 adjustTimeStep  no;
 maxCo           $maxCourant;
 maxDeltaT       1;                // no cap on the local step
-rDeltaTSmoothingCoeff 0.2;       // limits the local step ratio between neighbouring cells
+rDeltaTSmoothingCoeff 0.05;      // limits the local step ratio between neighbouring cells
 
 functions
 {
