@@ -19,7 +19,8 @@ MACHS=(1.5)
 ALPHAS=(0)
 BETAS=(0)
 P_BACKS=(capture)
-INIT_FROM=./detail_M1.4_a0_b0     # converged Mach 1.4 (auto would pick the same once the old Mach 1.5 is removed)
+INIT_FROM=none     # freestream + duct start, back pressure ramped in: restarts from another Mach number jump the
+                   # back pressure at iteration 1 and crashed twice (FPE on rank 87, Nov 2026)
 
 i=$SLURM_ARRAY_TASK_ID
 

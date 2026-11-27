@@ -147,8 +147,9 @@ ASYMPTOTE = {
     "CD":            1.0e-4,     # 1 drag count
     "CL":            5.0e-4,
     "Cm_pitch":      5.0e-4,
-    "mdot_engine_face": 4.0e-3,  # RELATIVE to the 1D engine-face mass flow (that scales with the
-                                 # freestream pressure); the free variable, the back pressure is imposed
+    "mdot_engine_face": 1.0e-2,  # RELATIVE to the 1D engine-face mass flow (that scales with the
+                                 # freestream pressure); the free variable, the back pressure is imposed.
+                                 # 1 %: Mach 0.2 (Nov 2026) swung 0.6 % with its 1000-iteration means flat to 0.02 %
 }
 ASYMPTOTE_RELATIVE      = ("mdot_engine_face",)
 # Low-q floor: a coefficient band is never asked to be tighter than these forces (complete aircraft) over
