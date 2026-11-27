@@ -15,11 +15,11 @@
 #SBATCH --mail-type=END,FAIL,TIME_LIMIT_90
 
 # Cases: 
-MACHS=(1.4)
+MACHS=(1.5)
 ALPHAS=(0)
 BETAS=(0)
 P_BACKS=(capture)
-INIT_FROM=auto
+INIT_FROM=./detail_M1.4_a0_b0     # converged Mach 1.4 (auto would pick the same once the old Mach 1.5 is removed)
 
 i=$SLURM_ARRAY_TASK_ID
 

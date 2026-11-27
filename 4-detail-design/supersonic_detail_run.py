@@ -848,6 +848,10 @@ def histories(case, f):
     # aircraft sign convention: Cm > 0 nose up, Cl > 0 starboard wing down, Cn > 0 nose to starboard
     h = {"t": t, "Fx_body": Fx, "Fz_body": Fz, "My_cg": My, "Drag": drag, "Lift": lift,
          "CD": drag / qS, "CL": lift / qS, "L_over_D": lift / drag, "Cm_pitch": My / (qS * C_REF)}
+    # airframe alone, the external drag (the duct walls carry the internal suction of the engine flow)
+    Fa = [S * on_t("forces_airframe", "force.dat", i) - pinf * f["wall_Sf"]["airframe"][i] for i in range(3)]
+    h["Drag_airframe"] = Fa[0] * ca * cb - Fa[1] * sb + Fa[2] * sa * cb
+    h["CD_airframe"] = h["Drag_airframe"] / qS
     if not f["half_model"]:     # zero by symmetry on a half model
         side = Fx * ca * sb + Fy * cb + Fz * sa * sb
         h.update(Fy_body=Fy, Mx_cg=Mx, Mz_cg=Mz, SideForce=side, CY=side / qS,
@@ -906,7 +910,7 @@ def reports(case, flow, hist):
 # =====================================================================================================
 
 PLOTS = [   # (title, series, y label); series missing from the histories (half model) are skipped
-    ("CD", ["CD"], "CD"), ("CL", ["CL"], "CL"), ("CY", ["CY"], "CY"),
+    ("CD", ["CD"], "CD"), ("CD airframe", ["CD_airframe"], "CD airframe"), ("CL", ["CL"], "CL"), ("CY", ["CY"], "CY"),
     ("Cm (pitch)", ["Cm_pitch"], "Cm about CG"), ("Cl (roll)", ["Cl_roll"], "Cl"),
     ("Cn (yaw)", ["Cn_yaw"], "Cn"), ("L over D", ["L_over_D"], "L/D"),
     ("CX net with engine", ["CX_net_with_engine"], "CX net"),

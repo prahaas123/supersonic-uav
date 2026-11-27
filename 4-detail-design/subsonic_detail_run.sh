@@ -5,7 +5,7 @@
 #SBATCH --job-name=subsonic_detail_run
 #SBATCH --account=def-jphickey
 #SBATCH --time=1-00:00:00
-#SBATCH --array=0-8
+#SBATCH --array=0-2,4,8
 #SBATCH --nodes=1
 #SBATCH --ntasks-per-node=100
 #SBATCH --cpus-per-task=1
@@ -15,11 +15,14 @@
 #SBATCH --mail-user=kprahaask@gmail.com
 #SBATCH --mail-type=END,FAIL,TIME_LIMIT_90
 
-# Cases: one entry per array index (keep --array=0-N in step with the list length)
+# Cases: one entry per array index (--array picks the indices to run; keep the lists the same length)
 MACHS=(0.1 0.2 0.3 0.4 0.5 0.6 0.7 0.8 0.9)
 ALPHAS=(0 0 0 0 0 0 0 0 0)
 BETAS=(0 0 0 0 0 0 0 0 0)
 ALTITUDES=(0 1375 2750 4125 5500 6875 8250 9625 11000)
+# engine-face recovery for the back pressure: measured at Mach 0.1-0.3 and 0.9 (Nov 2026 runs at 0.97),
+# linear between Mach 0.3 and 0.9 for the others
+RECOVERIES=(0.9064 0.9182 0.9317 0.9372 0.9428 0.9484 0.9539 0.9595 0.9650)
 INIT_FROM=auto
 
 i=$SLURM_ARRAY_TASK_ID
@@ -39,4 +42,4 @@ pip install --no-index numpy matplotlib
 export SQUEUE_FORMAT='%i","%j","%t","%M","%L","%D","%C","%m","%b","%R'
 
 python3 subsonic_run.py --mach ${MACHS[$i]} --alpha ${ALPHAS[$i]} --beta ${BETAS[$i]} \
-                               --altitude ${ALTITUDES[$i]} --init-from $INIT_FROM
+                               --altitude ${ALTITUDES[$i]} --recovery ${RECOVERIES[$i]} --init-from $INIT_FROM
