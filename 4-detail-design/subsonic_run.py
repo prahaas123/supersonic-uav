@@ -341,6 +341,7 @@ def flow_conditions(geo, half):
         exhaust_U_vec=[U_ex * c for c in geo["normal"]["exhaust"]],
         exhaust_thrust_1d=mdot_ex * U_ex + (p_ex - p) * A_ex,
         k_exhaust=k_ex, omega_exhaust=omega_ex,
+        **wall_pressure_terms(geo, CG),
     )
 
 def print_conditions(f):
@@ -386,13 +387,15 @@ def geometry_info(path):
     for need in GEOMETRY_SOLIDS:
         if need not in verts:
             raise SystemExit(f"{path} has no 'solid {need}' (found: {', '.join(verts)})")
-    area, normal, centre = {}, {}, {}
+    area, normal, centre, vector_area, area_moment = {}, {}, {}, {}, {}
     for name, v in verts.items():
         p = np.asarray(v, dtype=float).reshape(-1, 3, 3)
         n = 0.5 * np.cross(p[:, 1] - p[:, 0], p[:, 2] - p[:, 0])
         s = n.sum(axis=0)
         a = np.linalg.norm(n, axis=1)
         area[name] = float(a.sum())
+        vector_area[name] = s.tolist()                                    # sum of n dA, n out of the vehicle
+        area_moment[name] = np.cross(p.mean(axis=1), n).sum(axis=0).tolist()   # sum of r x n dA about 0
         normal[name] = list(s / np.linalg.norm(s)) if np.linalg.norm(s) > 0 else [0.0, 0.0, 0.0]
         centre[name] = [float(c) for c in (a[:, None] * p.mean(axis=1)).sum(axis=0) / a.sum()]
     # Engine face: the upstream end of the straight extension (along x), the same section as the outlet
@@ -401,7 +404,22 @@ def geometry_info(path):
     x_ef = float(np.asarray(verts["extension"], dtype=float)[:, 0].min())
     engine_face = {"x": x_ef, "centre": [x_ef, centre["outlet"][1], centre["outlet"][2]], "area": area["outlet"],
                    "radius": math.sqrt(area["outlet"] / math.pi), "x_outlet": centre["outlet"][0]}
-    return {"area": area, "normal": normal, "engine_face": engine_face}
+    return {"area": area, "normal": normal, "engine_face": engine_face, "vector_area": vector_area,
+            "area_moment": area_moment}
+
+def wall_pressure_terms(geo, cg):
+    """Gauge-pressure terms for the wall forces (complete aircraft, from the STL): per wall patch its vector area
+    Sf (out of the fluid, into the vehicle, as OpenFOAM's patch Sf = -the STL normal) and the moment of Sf about
+    cg. A uniform p_inf puts p_inf x Sf on a wall; histories() takes that off the absolute-pressure monitors."""
+    va, am = geo["vector_area"], geo["area_moment"]
+    if va["exhaust"][0] <= 0.0:
+        raise SystemExit("uav.stl: the exhaust normal points forward; the STL normals must point out of the vehicle")
+    c = np.asarray(cg, dtype=float)
+    return {"wall_Sf": {k: [-x for x in va[k]] for k in WALL_PATCHES},
+            "wall_Sf_moment": {k: (np.cross(c, va[k]) - np.asarray(am[k])).tolist() for k in WALL_PATCHES},
+            "exhaust_Sf": [-x for x in va["exhaust"]],
+            # a closed STL sums to zero; what is left bounds the error of the p_inf term
+            "stl_closure_area": float(np.linalg.norm(np.sum(list(va.values()), axis=0)))}
 
 # =====================================================================================================
 # Mesh
@@ -790,6 +808,14 @@ def histories(case, f):
 
     Fx, Fy, Fz = (S * force[:, i] for i in range(3))
     Mx, My, Mz = (S * on_t("forces", "moment.dat", i) for i in range(3))
+    # The monitors integrate the absolute pressure (pRef 0). The walls alone are open (at the engine face and the
+    # exhaust), so that carries p_inf x their vector area, no aerodynamic force: ~ p_inf x (A_exhaust - A_face)
+    # axially, 290 N at sea level. Wall forces and moments from here on are with the gauge pressure p - p_inf.
+    Fx_abs, pinf = Fx, f["p_inf"]
+    Sf = np.sum([f["wall_Sf"][k] for k in WALL_PATCHES], axis=0)
+    SfM = np.sum([f["wall_Sf_moment"][k] for k in WALL_PATCHES], axis=0)
+    Fx, Fy, Fz = Fx - pinf * Sf[0], Fy - pinf * Sf[1], Fz - pinf * Sf[2]
+    Mx, My, Mz = Mx - pinf * SfM[0], My - pinf * SfM[1], Mz - pinf * SfM[2]
     drag = Fx * ca * cb - Fy * sb + Fz * sa * cb
     lift = -Fx * sa + Fz * ca
     # aircraft sign convention: Cm > 0 nose up, Cl > 0 starboard wing down, Cn > 0 nose to starboard
@@ -812,8 +838,13 @@ def histories(case, f):
     # < 0 net thrust), as STAR's Fx_body + StreamThrust_face - StreamThrust_exhaust.
     I = {"engine_face": S * (on_t("engine_face_pressure", sfv, 0) + on_t("engine_face_momentum", sfv, 0)),
          "exhaust": S * (on_t("forces_exhaust", "force.dat", 3) + on_t("exhaust_momentum", sfv, 0))}
-    h["StreamThrust_engine_face"], h["StreamThrust_exhaust"] = I["engine_face"], -I["exhaust"]
-    h["Fx_net_with_engine"] = Fx + I["engine_face"] + I["exhaust"]
+    # Stream thrusts reported with p - p_inf (the exhaust one is the gross thrust). The net force stays the closed
+    # balance in absolute pressure, = Fx_body + StreamThrust_engine_face - StreamThrust_exhaust up to p_inf x the
+    # extension wall's axial area (zero for the straight extension) and the STL closure (summary).
+    h["StreamThrust_engine_face"] = I["engine_face"] - pinf * f["engine_face_area"]
+    h["StreamThrust_exhaust"] = -(I["exhaust"] - pinf * f["exhaust_Sf"][0])
+    h["Fx_net_with_engine"] = Fx_abs + I["engine_face"] + I["exhaust"]
+    h["Fx_body_abs"] = Fx_abs          # absolute-pressure wall force, as the monitors (for reference)
     h["CX_net_with_engine"] = h["Fx_net_with_engine"] / qS
     return h
 
@@ -838,8 +869,9 @@ def reports(case, flow, hist):
     for patch in WALL_PATCHES:
         t, d = read_dat(case, f"forces_{patch}", "force.dat")
         mean = flow["symmetry_factor"] * d[t >= t[-1] - ASYMPTOTE_WINDOW].mean(axis=0)
-        out["breakdown"].append({"boundary": patch, "Fx_total": mean[0], "Fx_pressure": mean[3],
-                                 "Fx_shear": mean[6], "Fz_total": mean[2]})
+        dp = [flow["p_inf"] * s for s in flow["wall_Sf"][patch]]      # p_inf part, taken off as in histories()
+        out["breakdown"].append({"boundary": patch, "Fx_total": mean[0] - dp[0], "Fx_pressure": mean[3] - dp[0],
+                                 "Fx_shear": mean[6], "Fz_total": mean[2] - dp[2]})
     return out
 
 # =====================================================================================================
@@ -951,8 +983,13 @@ def format_summary(m):
         lines.append(f"  {k + ' asymptote':<34s} band {s['width']:12.4g}  tol {s['tol']:10.4g}  "
                      f"satisfied={s['ok']}")
     lines += ["", f"== Reports (mean over the final {ASYMPTOTE_WINDOW} iterations, +/- std) =="]
+    if "wall_Sf" in f:
+        off = f["p_inf"] * sum(f["wall_Sf"][k][0] for k in WALL_PATCHES)
+        lines.append(f"  wall forces with p - p_inf: {off:+.1f} N of p_inf on the open walls taken off Fx_body "
+                     f"(Fx_body_abs); STL closure {f['stl_closure_area'] * 1e4:.3g} cm2 = "
+                     f"+/- {f['p_inf'] * f['stl_closure_area']:.2g} N")
     lines += [f"  {k:<32s} {rep[k]:14.6g}   +/- {std[k]:.3g}" for k in rep]
-    lines += ["", "== Axial force breakdown (complete aircraft) [N] ==",
+    lines += ["", "== Axial force breakdown (complete aircraft, p - p_inf) [N] ==",
               f"  {'boundary':<14s} {'Fx_total':>10s} {'Fx_press':>10s} {'Fx_shear':>10s} {'Fz_total':>10s}"]
     lines += [f"  {r['boundary']:<14s} {r['Fx_total']:10.3f} {r['Fx_pressure']:10.3f} "
               f"{r['Fx_shear']:10.3f} {r['Fz_total']:10.3f}" for r in m["breakdown"]]
@@ -987,6 +1024,29 @@ def format_summary(m):
     lines += [bar, f"  CONVERGED (stopping criteria): {m['converged']}", bar, ""]
     return "\n".join(lines)
 
+def post_only(case):
+    """The reports, monitor plots and summary of a finished case again, from its monitor files (no mesh, solve or
+    ParaView; the y+ and field checks of detail_post.py stay those of the run)."""
+    m = read_json(case)
+    if "flow" not in m or "stop_reason" not in m:
+        raise SystemExit(f"{case}: no metrics.json of a finished run")
+    with open(GEOMETRY, "rb") as fh:
+        md5 = hashlib.md5(fh.read()).hexdigest()
+    if m.get("mesh", {}).get("mesh_settings", {}).get("geometry_md5") not in (None, md5):
+        print(f"  warning: {os.path.basename(GEOMETRY)} has changed since the mesh of {case} was built")
+    m["flow"] = flow = {**m["flow"], **wall_pressure_terms(geometry_info(GEOMETRY), m["flow"]["cg"])}
+    hist = histories(case, flow)
+    m.update(reports(case, flow, hist))
+    write_json(case, m)
+    write_history_csv(case, hist)
+    plot_monitors(case, hist, m)
+    plot_residuals(case)
+    text = format_summary(m)
+    print(text)
+    with open(os.path.join(case, "summary.txt"), "w") as fh:
+        fh.write(text)
+    return 0 if m["converged"] else 2
+
 def parse_args(argv):
     """Command-line overrides of the INPUTS (anything not given keeps its value above)."""
     import argparse
@@ -1000,6 +1060,8 @@ def parse_args(argv):
     ap.add_argument("--p-back", help=f"outlet back pressure: a value [Pa] or '1d' (default {P_BACK or '1d'})")
     ap.add_argument("--init-from", help="initial field: 'auto', 'none' or a finished case directory "
                                         f"(default {INIT_FROM})")
+    ap.add_argument("--post-only", metavar="CASE", help="redo the reports, monitor plots and summary of a finished "
+                                                       "case from its monitor files (no mesh, solve or ParaView)")
     a = ap.parse_args(argv)
     g = globals()
     for opt, name in (("mach", "MACH"), ("alpha", "ALPHA_DEG"), ("beta", "BETA_DEG"), ("altitude", "ALTITUDE_M"),
@@ -1010,7 +1072,8 @@ def parse_args(argv):
         g["P_BACK"] = None if a.p_back.lower() == "1d" else float(a.p_back)
     if a.init_from is not None:
         g["INIT_FROM"] = None if a.init_from.lower() == "none" else a.init_from
+    return a.post_only
 
 if __name__ == "__main__":
-    parse_args(sys.argv[1:])
-    sys.exit(main())
+    post = parse_args(sys.argv[1:])
+    sys.exit(post_only(post) if post else main())
