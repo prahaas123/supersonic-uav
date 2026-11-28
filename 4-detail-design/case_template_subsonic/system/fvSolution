@@ -50,7 +50,9 @@ relaxationFactors
 {
     fields
     {
-        p               1;            // SIMPLEC needs no explicit p relaxation
+        // 0.7: at 1 an engine-face pressure / mass-flow oscillation (period ~20 iterations) grew x1.5 per
+        // cycle from iteration 300 and wrecked the whole field (Mach 0.5, 53 kPa back pressure, Nov 2026)
+        p               0.7;
     }
     equations
     {
@@ -58,9 +60,10 @@ relaxationFactors
         // (3-inlet-design: without it the first p solve hit NaN)
         p               1;
         // 0.5: at 0.7 a pressure disturbance grew along the hot exhaust plume and diverged by
-        // iteration 76 (Mach 0.9, local test mesh, Nov 2026)
-        U               0.5;
-        h               0.5;
+        // iteration 76 (Mach 0.9, local test mesh, Nov 2026); 0.3 with p 0.7 above (Mach 0.5 engine-face
+        // oscillation, Nov 2026)
+        U               0.3;
+        "(h|e)"         0.3;
         "(k|omega)"     0.5;
     }
 }

@@ -26,7 +26,7 @@ RECOVERIES=(0.9064 0.9182 0.9317 0.9372 0.9428 0.9484 0.9539 0.9595 0.9650)
 # outlet back pressure: '1d' = from the recovery above, or a value [Pa]. Mach 0.5 at the 1D value (49.4 kPa) asks the
 # inlet for more than its throat passes, goes transonic there and diverges; 53 kPa (~0.35-0.39 kg/s) is below choking
 P_BACKS=(1d 1d 1d 1d 53000 1d 1d 1d 1d)
-INIT_FROM=auto
+INIT_FROM=none     # 'auto' would restart Mach 0.5 from its own failed run (same altitude, stopped by max_iterations)
 
 i=$SLURM_ARRAY_TASK_ID
 
